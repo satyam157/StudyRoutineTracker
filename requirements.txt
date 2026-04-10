@@ -1,0 +1,10 @@
+streamlit
+pandas
+plotly
+groq
+streamlit-calendar
+psycopg2-binary
+SQLAlchemy
+python-dotenv
+supabase
+yt-dlp

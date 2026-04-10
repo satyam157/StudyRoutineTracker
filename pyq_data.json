@@ -1,0 +1,102 @@
+{
+  "prelims": [
+    {
+      "subject": "Current Affairs",
+      "importance_score": 99,
+      "frequency_rank": 1,
+      "important_chapters": "Recent Events (2024-2025), National Issues, International Relations, Climate Action, Social Movements, Economic Updates",
+      "important_topics": "Budget announcements, Government schemes, Climate summits, Election updates, UN decisions, Trade relations, Infrastructure projects, Tech advancements",
+      "revision_strategy": "Daily current affairs tracking. Weekly news summary. Bi-weekly comprehensive revision. Monthly categorization into static + dynamic components."
+    },
+    {
+      "subject": "Polity",
+      "importance_score": 96,
+      "frequency_rank": 2,
+      "important_chapters": "Constitution, Fundamental Rights, Directive Principles, Parliamentary System, President & Vice-President, Lok Sabha & Rajya Sabha, Cabinet, Supreme Court",
+      "important_topics": "Amendment procedures, Bills process, Constitutional bodies, Rights vs Duties, Executive-Legislative relations, Judicial review, Election commission",
+      "revision_strategy": "Conceptual foundation first (Constitution structure). MCQ practice on specific articles. Mock tests on scenario-based questions. Regular revision of recent amendments."
+    },
+    {
+      "subject": "History",
+      "importance_score": 95,
+      "frequency_rank": 3,
+      "important_chapters": "Ancient India, Medieval India, British India, Freedom Struggle, Post-independence, Cultural heritage, Monuments",
+      "important_topics": "Mauryan empire, Mughal period, Company rule, Key freedom fighters, Constitution making, Archaeological sites, Dynasties and rulers",
+      "revision_strategy": "Chronological study approach. Thematic connections across periods. Timeline creation for each era. Practice timeline-based and fact-based MCQs. Mind maps for complex periods."
+    },
+    {
+      "subject": "Geography",
+      "importance_score": 92,
+      "frequency_rank": 4,
+      "important_chapters": "Physical Geography (Climate, Landforms), Economic Geography, Human Geography, Indian Geography, Map-based knowledge",
+      "important_topics": "Monsoon patterns, Soil types, River systems, Mountain ranges, Agricultural zones, Mineral resources, Population distribution, Earthquake zones",
+      "revision_strategy": "Physical maps study. Thematic maps creation. Climate-vegetation relationships. State-wise geography focus. Latitude-longitude practice. Monthly map revision."
+    },
+    {
+      "subject": "Economics",
+      "importance_score": 88,
+      "frequency_rank": 5,
+      "important_chapters": "Microeconomics basics, Macroeconomics, Indian Economy, Monetary & Fiscal Policy, Inflation & Deflation, Trade",
+      "important_topics": "GDP and growth rates, Inflation rates, Interest rates, Budget components, Direct-indirect taxes, FDI, Exports-imports, Stock market basics",
+      "revision_strategy": "Concepts with current data. Comparative analysis year-on-year. Budget document familiarity. Economic survey highlights. Real case studies from India."
+    },
+    {
+      "subject": "Environment & Ecology",
+      "importance_score": 87,
+      "frequency_rank": 6,
+      "important_chapters": "Ecosystems, Biodiversity, Pollution, Conservation, Climate Change, Environmental laws, Protected areas",
+      "important_topics": "Renewable energy, Wildlife protection acts, Ramsar wetlands, Biosphere reserves, Deforestation, Environmental impact assessment, Green initiatives",
+      "revision_strategy": "Concept mapping. Data about India's biodiversity. Protected area locations. Environmental laws with amendments. Climate science fundamentals. Case studies on conservation."
+    }
+  ],
+  "mains": [
+    {
+      "subject": "Polity",
+      "importance_score": 98,
+      "frequency_rank": 1,
+      "important_chapters": "Constitution - structure and features, Federalism, Separation of powers, Rights and duties, Amendment procedure, Electoral system, Local governance",
+      "important_topics": "Constitutional vision, Directive principles vs Fundamental rights, Executive accountability, Parliamentary procedures, E-governance, Cooperative federalism, Constitutional commissions",
+      "revision_strategy": "Deep study of constitutional provisions with case law. Analysis of major Supreme Court judgments. Comparative constitutionalism. Current constitutional debates. Essay writing on constitutional themes. Answer writing practice on case-based scenarios."
+    },
+    {
+      "subject": "History",
+      "importance_score": 97,
+      "frequency_rank": 2,
+      "important_chapters": "Indus Valley Civilization, Vedic period, Mauryan and Gupta empires, Medieval kingdoms, British colonial period, Independence movement, Nation building",
+      "important_topics": "Historical determinism vs contingency, Historiography changes, Gender in history, Economic history of India, Cultural interactions, Legacy of empires, Freedom struggle phases",
+      "revision_strategy": "Analytical approach to historiography. Long essays on major periods. Comparison between historical periods. Primary sources analysis. Research paper reading. Critical historical perspective."
+    },
+    {
+      "subject": "Geography",
+      "importance_score": 94,
+      "frequency_rank": 3,
+      "important_chapters": "Geomorphology, Climate systems, Human geography, Regional planning, Sustainability, Geographical analysis methods",
+      "important_topics": "River management, Urban planning, Regional disparities, Migration patterns, Resource management, Disaster management, Infrastructure development, Geopolitical issues",
+      "revision_strategy": "Geospatial analysis and interpretation. Critical study of development models. Regional case studies. Contemporary geographical problems. Research paper writing on geographical themes."
+    },
+    {
+      "subject": "Environment & Ecology",
+      "importance_score": 90,
+      "frequency_rank": 4,
+      "important_chapters": "Ecosystem functioning, Biodiversity management, Environmental degradation, Sustainable development, Climate change mitigation, Conservation strategies",
+      "important_topics": "Ecological carrying capacity, Biodiversity loss drivers, Climate financing, Green economy, Environmental justice, Transboundary issues, Habitat restoration",
+      "revision_strategy": "Scientific understanding of ecological systems. Global environmental agreements analysis. Case studies on environmental management. Essay writing on sustainability. Critical appraisal of development vs conservation."
+    },
+    {
+      "subject": "Economics",
+      "importance_score": 91,
+      "frequency_rank": 5,
+      "important_chapters": "Economic theory and practices, Development economics, International trade, Fiscal and monetary policies, Inequality and poverty, Sectoral economics",
+      "important_topics": "Growth vs development, Structural changes, Inclusive growth, Globalization impact, Financial systems, Infrastructure economics, Human capital, Resource allocation",
+      "revision_strategy": "Theoretical framework understanding. Indian economic data analysis. Econometric concepts. Policy evaluation and critique. Research papers on economic issues. Essay writing on economic development."
+    },
+    {
+      "subject": "Public Administration",
+      "importance_score": 85,
+      "frequency_rank": 6,
+      "important_chapters": "Theories of public administration, Organization theory, Human resource management, Ethics and accountability, Indian administrative system, Service delivery",
+      "important_topics": "Bureaucratic behavior, State capacity, Administrative reforms, E-governance, Grievance redressal, Personnel management, Policy implementation, Good governance",
+      "revision_strategy": "Conceptual clarity in administrative theories. Indian bureaucracy analysis. Case studies in public policy. Ethics-based scenarios. Implementation challenges analysis. Contemporary administrative reforms study."
+    }
+  ]
+}
