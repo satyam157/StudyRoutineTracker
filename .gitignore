@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 readme.txt
 readme.md
+.idea/
+esu-env/
+venv/
+.venv/
+env/
