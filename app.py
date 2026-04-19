@@ -11,6 +11,13 @@ import pandas as pd
 import plotly.express as px
 import datetime
 from datetime import timedelta, date
+import shutil
+import os
+import sys
+import subprocess
+import tempfile
+import time
+
 
 
 # --- Isolated Music Player Styling (ONLY affects the music player, nothing else) ---
@@ -59,13 +66,66 @@ st.markdown("""
         border-radius: 10px;
     }
 
-    /* --- Media Player main page card (class-scoped, safe) --- */
-    .media-player-card {
-        background: linear-gradient(160deg, #161b22 0%, #0d1117 100%);
-        border: 1px solid #30363d;
-        border-radius: 20px;
-        padding: 25px;
-        box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+    /* --- Song Selectbox (Premium Dark Look) --- */
+    /* Sidebar Scoped */
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        background-color: #0d1117 !important;
+        color: #f0f6fc !important;
+        border: 1px solid #30363d !important;
+        border-radius: 10px !important;
+        font-size: 0.85rem !important;
+        transition: all 0.2s ease;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"]:hover > div {
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 0 1px #38bdf8 !important;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] svg {
+        fill: #38bdf8 !important;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-testid="stMarkdownContainer"] p {
+        color: #8b949e !important;
+        font-size: 0.75rem !important;
+    }
+
+    /* Media Player Page Scoped */
+    .element-container:has(#media-player-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        background-color: #0d1117 !important;
+        color: #f0f6fc !important;
+        border: 1px solid #334155 !important;
+        border-radius: 12px !important;
+        padding: 5px 10px !important;
+    }
+    .element-container:has(#media-player-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"]:hover > div {
+        border-color: #38bdf8 !important;
+    }
+
+    /* --- Dropdown Menu (Global but specific to BaseWeb popovers) --- */
+    /* Note: Streamlit portals popovers to the body, making them hard to isolate. 
+       We apply a dark theme to all popovers which fits the 'Premium' aesthetic. */
+    div[data-baseweb="popover"] {
+        background-color: transparent !important;
+    }
+    div[data-baseweb="popover"] ul {
+        background-color: #0d1117 !important;
+        border: 1px solid #30363d !important;
+        border-radius: 12px !important;
+        padding: 8px !important;
+    }
+    div[data-baseweb="popover"] li {
+        background-color: transparent !important;
+        color: #c9d1d9 !important;
+        border-radius: 6px !important;
+        margin: 2px 0 !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-baseweb="popover"] li:hover {
+        background-color: #161b22 !important;
+        color: #38bdf8 !important;
+    }
+    div[data-baseweb="popover"] li[aria-selected="true"] {
+        background-color: rgba(56, 189, 248, 0.1) !important;
+        color: #38bdf8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -210,11 +270,61 @@ USER_CONFIG = get_user_config(USER)
 import os
 import re
 import random as _rand
+from database import supabase_client, STORAGE_BUCKET
 
-all_mp3s = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+# Helper to get songs from Supabase Storage + Local fallback
+# Helper to get songs from Supabase Storage + Local fallback
+def get_all_songs(force_refresh=False):
+    # Use glob for recursive search to find songs in subfolders too
+    import glob
+    # Find all .mp3 files in the current directory and all subdirectories
+    all_files = glob.glob("**/*.mp3", recursive=True)
+    # Filter out anything in common hidden/ignored folders
+    local_songs = [f for f in all_files if not any(x in f for x in ['.git', '__pycache__', 'venv', 'env'])]
+    
+    # Normalize paths to use forward slashes for consistency
+    local_songs = [f.replace("\\", "/") for f in local_songs]
+
+    if not supabase_client:
+        return sorted(list(set(local_songs)))
+    
+    try:
+        # We don't cache this at the Streamlit level by default, 
+        # but we could if the bucket is very large.
+        res = supabase_client.storage.from_(STORAGE_BUCKET).list()
+        if isinstance(res, list):
+            cloud_songs = [f['name'] for f in res if f['name'].lower().endswith(".mp3")]
+            # Combine and remove duplicates
+            return sorted(list(set(local_songs + cloud_songs)))
+        return sorted(list(set(local_songs)))
+    except Exception as e:
+        print(f"Error listing Supabase songs: {e}")
+        return sorted(list(set(local_songs)))
+
+def get_song_url(filename):
+    # Check if file exists locally first
+    if os.path.exists(filename):
+        return filename
+    
+    if not supabase_client:
+        return filename
+        
+    try:
+        return supabase_client.storage.from_(STORAGE_BUCKET).get_public_url(filename)
+    except:
+        return filename
+
+# Initial load
+if "all_mp3s" not in st.session_state or st.session_state.get("_refresh_music"):
+    st.session_state.all_mp3s = get_all_songs()
+    st.session_state._refresh_music = False
+
+all_mp3s = st.session_state.all_mp3s
 
 def clean_song_name(filename):
-    name = filename.replace(".mp3", "")
+    # Get basename if it's a path
+    name = os.path.basename(filename)
+    name = name.replace(".mp3", "")
     name = re.sub(r' \d+ [Kk]bps| Youngistaan', '', name)
     name = name.replace("_", " ").replace("-", " ")
     name = " ".join(name.split()).title()
@@ -225,13 +335,31 @@ def clean_song_name(filename):
     return f"{name} 🎵"
 
 if "Perfect.mp3" in all_mp3s:
-    all_mp3s.remove("Perfect.mp3")
-    all_mp3s.sort()
-    all_mp3s.insert(0, "Perfect.mp3")
+    # Use a copy to avoid modifying the session state list directly if needed
+    temp_list = list(all_mp3s)
+    temp_list.remove("Perfect.mp3")
+    temp_list.sort()
+    temp_list.insert(0, "Perfect.mp3")
+    all_mp3s = temp_list
 else:
-    all_mp3s.sort()
+    all_mp3s = sorted(all_mp3s)
 
-song_options_dict = {clean_song_name(f): f for f in all_mp3s} if all_mp3s else {}
+# Dictionary of {CleanName: Filename}
+# Use full path as value to ensure correct playback, handle collisions
+song_options_dict = {}
+if all_mp3s:
+    for f in all_mp3s:
+        clean = clean_song_name(f)
+        if clean in song_options_dict:
+            # Collision! Append parent folder or a bit of the hash
+            parent = os.path.basename(os.path.dirname(f))
+            if parent:
+                clean = f"{clean} [{parent}]"
+            else:
+                # If both in root (shouldn't happen with set()), just use full name
+                clean = f"{clean} ({f})"
+        song_options_dict[clean] = f
+
 song_names_list = list(song_options_dict.keys())
 
 if "music_idx" not in st.session_state:
@@ -250,7 +378,7 @@ if "music_play_triggered" not in st.session_state:
 def _render_music_player(is_mylove=False):
     """Render the sidebar music player with warm light-colored scrollable song list."""
     if not song_names_list:
-        st.sidebar.info("No .mp3 files found in root directory.")
+        st.sidebar.info("🎵 No .mp3 files found in Cloud Storage or Local Directory.")
         st.sidebar.divider()
         return
 
@@ -258,12 +386,17 @@ def _render_music_player(is_mylove=False):
 
     st.sidebar.markdown("""
         <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); 
-                    padding: 12px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 15px;">
+                    padding: 12px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 15px;
+                    display: flex; justify-content: space-between; align-items: center;">
             <h3 style="color: #38bdf8; margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">
                 <span>🎵</span> Media Box
             </h3>
         </div>
     """, unsafe_allow_html=True)
+
+    if st.sidebar.button("🔄 Refresh Library", key="refresh_music_sidebar", use_container_width=True):
+        st.session_state._refresh_music = True
+        st.rerun()
 
     def next_song():
         if not song_names_list: return
@@ -327,9 +460,21 @@ def _render_music_player(is_mylove=False):
     if st.session_state.music_idx >= len(song_names_list):
         st.session_state.music_idx = 0
 
-    # The detailed song list and selector have been removed from the sidebar.
-    # Users will select songs from the Media Player page instead.
-    
+    # --- Song Selector Dropdown ---
+    def _on_sidebar_sel_change():
+        if st.session_state.sidebar_song_selector in song_names_list:
+            st.session_state.music_idx = song_names_list.index(st.session_state.sidebar_song_selector)
+            st.session_state.music_playing = True
+
+    st.sidebar.selectbox(
+        "Select Song",
+        options=song_names_list,
+        index=st.session_state.music_idx,
+        key="sidebar_song_selector",
+        on_change=_on_sidebar_sel_change,
+        label_visibility="collapsed"
+    )
+
     current_song_path = song_options_dict[song_names_list[st.session_state.music_idx]]
     st.sidebar.markdown(f"""
         <div style="background-color: #161b22; padding: 10px; border-radius: 8px; border-left: 3px solid #38bdf8; margin-bottom: 10px;">
@@ -342,7 +487,7 @@ def _render_music_player(is_mylove=False):
     
     # Auto-play only on MyLove Special or if already started by user
     should_autoplay = is_mylove or st.session_state.music_playing
-    st.sidebar.audio(current_song_path, format="audio/mp3", autoplay=should_autoplay)
+    st.sidebar.audio(get_song_url(current_song_path), format="audio/mp3", autoplay=should_autoplay)
 
     # --- JS: actually stop or start the audio element in the browser ---
     if st.session_state.get("music_stop_triggered"):
@@ -467,12 +612,39 @@ menu_options.append("Chat")
 if USER_CONFIG.get("can_view_mylove_special"):
     menu_options.append("MyLove Special")
 
-menu = st.sidebar.radio("Menu", menu_options)
+# --- MENU SELECTION ---
+if "menu" not in st.session_state:
+    st.session_state.menu = menu_options[0]
+
+# If we were previously on a menu that is no longer available (e.g. logout/config change), 
+# default to the first available option.
+if st.session_state.menu not in menu_options:
+    st.session_state.menu = menu_options[0]
 
 # Handle "Media Player" jump from sidebar music player button
 if st.session_state.get("_jump_to_media_player"):
     st.session_state["_jump_to_media_player"] = False
-    menu = "Media Player"
+    st.session_state.menu = "Media Player"
+
+def _on_menu_change():
+    st.session_state.menu = st.session_state.main_menu_radio
+
+# Find current index for the radio button
+try:
+    menu_index = menu_options.index(st.session_state.menu)
+except ValueError:
+    menu_index = 0
+
+menu = st.sidebar.radio(
+    "Menu", 
+    menu_options, 
+    index=menu_index,
+    key="main_menu_radio",
+    on_change=_on_menu_change
+)
+
+# Sync back to menu variable for the rest of the script
+menu = st.session_state.menu
 
 # Auto-select configured default song when first entering MyLove Special
 if menu == "MyLove Special":
@@ -658,7 +830,7 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             """, unsafe_allow_html=True)
 
             _current_mp_path = song_options_dict[song_names_list[st.session_state.music_idx]]
-            st.audio(_current_mp_path, format="audio/mp3", autoplay=st.session_state.music_playing)
+            st.audio(get_song_url(_current_mp_path), format="audio/mp3", autoplay=st.session_state.music_playing)
 
         with _np_controls:
             def _mp_next():
@@ -786,7 +958,7 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             </script>
             """, unsafe_allow_javascript=True)
     else:
-        st.info("No .mp3 files found in the project directory.")
+        st.info("🎵 No .mp3 files found. Try downloading or uploading one above!")
 
     st.divider()
 
@@ -809,56 +981,236 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
         yt_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
         custom_name = st.text_input("Custom filename (optional)", placeholder="Leave blank to use video title")
         
+        # --- Advanced Settings for bypassing blocks ---
+        with st.expander("🛠️ Advanced Settings (Bypass 403 Forbidden)"):
+            st.markdown("""
+            YouTube often blocks requests from cloud servers. If you get a **403 Forbidden** error:
+            1. Use a **Cookies** file (Netscape format). Use 'Get cookies.txt' extension.
+            2. Or try a different video.
+            """)
+            cookie_text = st.text_area("Paste Cookies Content", height=100, help="Paste the content of your cookies.txt here.")
+            force_update = st.checkbox("Force update yt-dlp & ffmpeg before download", value=False)
+            col_client, col_mobile = st.columns(2)
+            with col_client:
+                # Changed default to android (index 1) as it often handles challenges better
+                player_client = st.selectbox("Player Client", ["android", "ios", "web", "mweb", "tv"], index=0, help="Changing this can help if a video is blocked or signature fails.")
+            with col_mobile:
+                use_mobile_client = st.checkbox("Use Advanced Client Strategy", value=True)
+            
+            st.info("💡 **Tip:** If you see 'n challenge solving failed', ensure you have **Node.js** installed on your server/computer. I've added it to `packages.txt` for Streamlit Cloud.")
+
         if st.button("⬇️ Download as MP3", type="primary", width='stretch'):
             if yt_url.strip():
-                import subprocess
-                import shutil
+                # Update only if forced or if it's the first time
+                if force_update:
+                    with st.spinner("🎵 Updating downloader tools..."):
+                        try:
+                            subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "static-ffmpeg"], check=True, capture_output=True)
+                        except Exception as e:
+                            st.warning(f"Update failed: {e}")
                 
-                # Check if yt-dlp is available
-                if not shutil.which("yt-dlp"):
-                    st.warning("⏳ Installing yt-dlp... this may take a moment.")
+                # 1. Try to find ffmpeg (System first, then static-ffmpeg)
+                ffmpeg_location = shutil.which("ffmpeg")
+                if not ffmpeg_location:
                     try:
-                        subprocess.run(["pip", "install", "yt-dlp"], check=True, capture_output=True)
-                        st.success("✅ yt-dlp installed!")
-                    except Exception as e:
-                        st.error(f"Failed to install yt-dlp: {e}")
-                        st.stop()
-                
+                        import static_ffmpeg
+                        pkg_dir = os.path.dirname(static_ffmpeg.__file__)
+                        potential_bins = [
+                            os.path.join(pkg_dir, "bin", "win32"),
+                            os.path.join(pkg_dir, "bin"),
+                            os.path.join(pkg_dir, "static_ffmpeg", "bin", "win32")
+                        ]
+                        ffmpeg_exe = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
+                        for pb in potential_bins:
+                            target = os.path.join(pb, ffmpeg_exe)
+                            if os.path.exists(target):
+                                ffmpeg_location = target
+                                break
+                    except:
+                        pass
+
+                # 2. Check for Node.js (required for 'n challenge' signature decryption)
+                # Streamlit Cloud usually has nodejs if added to packages.txt
+                node_available = shutil.which("node") or shutil.which("nodejs")
+                if not node_available:
+                    with st.spinner("🔧 Providing JavaScript runtime for bypass..."):
+                        try:
+                            # Try nodejs-bin as fallback
+                            subprocess.run([sys.executable, "-m", "pip", "install", "nodejs-bin"], capture_output=True)
+                            import nodejs_bin
+                            node_dir = os.path.dirname(nodejs_bin.__file__)
+                            # Exhaustive search for the node binary
+                            for sub in ["bin", "node_bin", "scripts", "Scripts", ""]:
+                                bp = os.path.abspath(os.path.join(node_dir, sub))
+                                for exe in ["node", "node.exe", "nodejs"]:
+                                    if os.path.exists(os.path.join(bp, exe)):
+                                        if bp not in os.environ["PATH"]:
+                                            os.environ["PATH"] = bp + os.pathsep + os.environ["PATH"]
+                                        node_available = os.path.join(bp, exe)
+                                        break
+                                if node_available: break
+                        except: pass
+
                 with st.spinner("🎵 Downloading and converting to MP3..."):
                     try:
                         output_template = f"{custom_name.strip()}.%(ext)s" if custom_name.strip() else "%(title)s.%(ext)s"
                         
+                        # Create temporary cookie file if provided
+                        cookie_file_path = None
+                        final_cookie_text = cookie_text.strip()
+                        
+                        # Fallback to Streamlit Secrets for cookies if available
+                        if not final_cookie_text and "YOUTUBE_COOKIES" in st.secrets:
+                            final_cookie_text = st.secrets["YOUTUBE_COOKIES"]
+                            
+                        if final_cookie_text:
+                            fd, cookie_file_path = tempfile.mkstemp(suffix=".txt")
+                            with os.fdopen(fd, 'w') as tmp:
+                                tmp.write(final_cookie_text)
+
+                        # Build the command
                         cmd = [
-                            "yt-dlp",
+                            sys.executable, "-m", "yt_dlp",
                             "-x",
                             "--audio-format", "mp3",
                             "--audio-quality", "192K",
                             "-o", output_template,
                             "--no-playlist",
-                            "--restrict-filenames" if not custom_name.strip() else "--no-restrict-filenames",
-                            yt_url.strip()
+                            "--no-check-certificate",
+                            "--prefer-free-formats",
+                            "--format", "bestaudio/best",
+                            "--add-header", "Accept-Language:en-US,en;q=0.9"
                         ]
                         
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=300
-                        )
+                        # Add cookies if available
+                        if cookie_file_path:
+                            cmd.extend(["--cookies", cookie_file_path])
+                        elif os.name == 'nt':
+                            try: cmd.extend(["--cookies-from-browser", "chrome+edge"])
+                            except: pass
+                            
+                        # Strategy helper
+                        def get_cmd_for_strat(base_cmd, strat):
+                            c = base_cmd.copy()
+                            # ios and android_music are best for bypassing n-challenge
+                            c.extend(["--extractor-args", f"youtube:player_client={strat}"])
+                            if "ios" in strat:
+                                c.extend(["--user-agent", "com.google.ios.youtube/19.12.3 (iPhone16,2; U; CPU iOS 17_4_1 like Mac OS X; en_US) gzip"])
+                            elif "android" in strat:
+                                c.extend(["--user-agent", "com.google.android.youtube/19.12.39 (Linux; U; Android 14; en_US) gzip"])
+                            elif "tv" in strat:
+                                c.extend(["--user-agent", "Mozilla/5.0 (Chromecast; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"])
+                            
+                            # Add referer to look less like a direct bot request
+                            c.extend(["--referer", "https://www.youtube.com/"])
+                            return c
+
+                        # Set initial strategy to iOS (currently the most resilient against bot-checks)
+                        initial_strat = "ios,android_music,android"
+                        full_cmd = get_cmd_for_strat(cmd, initial_strat)
+                        
+                        # Set ffmpeg location if we found a non-system one
+                        if ffmpeg_location and not shutil.which("ffmpeg"):
+                            full_cmd.extend(["--ffmpeg-location", ffmpeg_location])
+                        
+                        full_cmd.extend([
+                            "--restrict-filenames" if not custom_name.strip() else "--no-restrict-filenames",
+                            yt_url.strip()
+                        ])
+                        
+                        # --- TRY 1 ---
+                        result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=300, env=os.environ)
+                        
+                        # --- AUTOMATIC RETRY IF BLOCKED OR SIGNATURE FAILS ---
+                        is_blocked = "403" in result.stderr or "forbidden" in result.stderr.lower()
+                        is_challenge = "signature" in result.stderr.lower() or "n challenge" in result.stderr.lower()
+                        is_bot = "confirm you're not a bot" in result.stderr.lower()
+                        
+                        if result.returncode != 0 and (is_blocked or is_challenge or is_bot):
+                            st.info("🔄 Issue detected. Attempting deep bypass and recursive retries...")
+                            try:
+                                # Update and clear cache
+                                subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"], capture_output=True)
+                                subprocess.run([sys.executable, "-m", "yt_dlp", "--rm-cache-dir"], capture_output=True)
+                            except: pass
+                                
+                            # Expanded Strategy Pool
+                            strategies = [
+                                "ios", "android_music", "android", "web,tv", 
+                                "mweb,ios", "web_creator", "tv,android", "mweb"
+                            ]
+                            
+                            for strat in strategies:
+                                st.caption(f"Recursive retry attempt using strategy: {strat}...")
+                                retry_cmd = get_cmd_for_strat(cmd, strat)
+                                if ffmpeg_location and not shutil.which("ffmpeg"):
+                                    retry_cmd.extend(["--ffmpeg-location", ffmpeg_location])
+                                
+                                # Add deep bypass flags
+                                retry_cmd.extend(["--geo-bypass", "--no-check-certificate"])
+                                retry_cmd.extend([
+                                    "--restrict-filenames" if not custom_name.strip() else "--no-restrict-filenames",
+                                    yt_url.strip()
+                                ])
+                                
+                                result = subprocess.run(retry_cmd, capture_output=True, text=True, timeout=300, env=os.environ)
+                                if result.returncode == 0:
+                                    st.success(f"✅ Success! Bypass found with {strat} strategy.")
+                                    break
+                                elif "429" in result.stderr:
+                                    st.warning(f"⚠️ Rate limited on {strat}. Pausing...")
+                                    time.sleep(2)
+                        
+                        # Cleanup cookie file
+                        if cookie_file_path and os.path.exists(cookie_file_path):
+                            try: os.remove(cookie_file_path)
+                            except: pass
                         
                         if result.returncode == 0:
-                            # Find the newly downloaded file
-                            import glob
-                            new_mp3s = set(glob.glob("*.mp3")) - set(all_mp3s)
-                            if new_mp3s:
-                                new_file = list(new_mp3s)[0]
-                                st.success(f"✅ Downloaded: **{new_file}**")
-                                st.balloons()
-                                st.info("🔄 Refresh the page to see it in the music player.")
-                            else:
-                                st.success("✅ Download complete! Refresh to see the new song.")
+                            # Upload to Supabase if available
+                            downloaded_file = None
+                            # Find all matching mp3s and pick the most recent one
+                            matches = []
+                            for f in os.listdir("."):
+                                if f.lower().endswith(".mp3"):
+                                    if not custom_name.strip() or custom_name.strip() in f:
+                                        matches.append(f)
+                            
+                            if matches:
+                                matches.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                                downloaded_file = matches[0]
+                             
+                            if downloaded_file and supabase_client:
+                                with st.spinner("☁️ Uploading to Supabase Storage..."):
+                                    try:
+                                        with open(downloaded_file, "rb") as f:
+                                            supabase_client.storage.from_(STORAGE_BUCKET).upload(
+                                                path=downloaded_file,
+                                                file=f,
+                                                file_options={"content-type": "audio/mpeg"}
+                                            )
+                                        os.remove(downloaded_file) # Clean up local
+                                        st.success("✅ Uploaded to Supabase!")
+                                    except Exception as upload_err:
+                                        st.warning(f"Local download ok, but Supabase upload failed: {upload_err}")
+
+                            st.success("✅ Download complete! Adding to library...")
+                            st.balloons()
+                            import time
+                            time.sleep(2)
+                            st.rerun()
                         else:
-                            st.error(f"Download failed:\n```\n{result.stderr[-500:]}\n```")
+                            err_msg = result.stderr
+                            if "403: Forbidden" in err_msg:
+                                st.error("❌ **YouTube blocked the request (403 Forbidden).**\n\nYouTube has flagged this server's IP. To fix this:\n1. Expand 'Advanced Settings' above.\n2. Paste your **YouTube Cookies** (Netscape format).\n3. Try again.\n\n*Changing the 'Player Client' in Advanced Settings also helps.*")
+                            elif "n challenge" in err_msg.lower() or "signature" in err_msg.lower():
+                                st.error("❌ **Signature Challenge Failed even after automatic retries.**\n\nYouTube is using a new security measure that requires a JavaScript runtime. I've attempted to automatically install a Node.js runtime and retry with different strategies, but it still failed. To fix this definitively:\n1. Expand **Advanced Settings** above.\n2. Paste your **YouTube Cookies** (Netscape format).\n3. Try again. This bypasses the signature challenge entirely.")
+                            elif "Requested format is not available" in err_msg:
+                                st.error("❌ **Format not available.**\n\nYouTube is hiding the audio formats for this video from this server. Try using **Cookies** or changing the **Player Client** to **Android**.")
+                            elif "ffmpeg" in err_msg.lower():
+                                st.error("❌ **ffmpeg not found.**\n\nConversion to MP3 failed. I've attempted to install it. Please try again.")
+                            else:
+                                st.error(f"Download failed:\n```\n{err_msg[-500:]}\n```")
                     except subprocess.TimeoutExpired:
                         st.error("⏱️ Download timed out (5 min limit). Try a shorter video.")
                     except Exception as e:
@@ -874,25 +1226,66 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             if not save_name.endswith(".mp3"):
                 save_name += ".mp3"
             if st.button("💾 Save Song", key="save_upload_btn"):
-                with open(save_name, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                st.success(f"✅ Saved as **{save_name}**")
+                if supabase_client:
+                    with st.spinner("☁️ Uploading to Supabase..."):
+                        try:
+                            supabase_client.storage.from_(STORAGE_BUCKET).upload(
+                                path=save_name,
+                                file=uploaded_file.getbuffer().tobytes(),
+                                file_options={"content-type": "audio/mpeg"}
+                            )
+                            st.success(f"✅ Uploaded **{save_name}** to Supabase!")
+                        except Exception as e:
+                            st.error(f"Supabase upload failed: {e}")
+                else:
+                    with open(save_name, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    st.success(f"✅ Saved locally as **{save_name}**")
+                
                 st.balloons()
                 import time; time.sleep(1)
                 st.rerun()
     
     with tab_manage:
         st.markdown("### 📋 Current Song Library")
-        current_mp3s = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+        
+        # Add refresh button in management tab too
+        _refresh_col, _debug_col = st.columns([1, 1])
+        with _refresh_col:
+            if st.button("🔄 Rescan Library", key="rescan_btn", use_container_width=True):
+                st.session_state._refresh_music = True
+                st.rerun()
+        
+        with _debug_col:
+            with st.expander("🛠️ Library Debug"):
+                st.write(f"**CWD:** `{os.getcwd()}`")
+                st.write(f"**Total Songs Found:** {len(all_mp3s)}")
+                st.write("**Local Paths Scanned:**")
+                st.json(all_mp3s)
+            
+        current_mp3s = all_mp3s # Use the already computed list
         if not current_mp3s:
             st.info("No songs found.")
         else:
             st.caption(f"**{len(current_mp3s)}** songs in library")
             for mp3 in sorted(current_mp3s):
-                file_size_mb = os.path.getsize(mp3) / (1024 * 1024)
+                # Try to get size from supabase or local
+                try:
+                    if supabase_client:
+                        # Listing already gave us some info but let's keep it simple
+                        file_size_mb = 0 # Difficult to get size for each without extra calls
+                    else:
+                        file_size_mb = os.path.getsize(mp3) / (1024 * 1024)
+                except:
+                    file_size_mb = 0
+
                 mc1, mc2, mc3 = st.columns([3, 1, 1])
                 mc1.markdown(f"🎵 **{clean_song_name(mp3)}**")
-                mc2.caption(f"{file_size_mb:.1f} MB")
+                if file_size_mb > 0:
+                    mc2.caption(f"{file_size_mb:.1f} MB")
+                else:
+                    mc2.caption("Cloud")
+                
                 if mc3.button("🗑️", key=f"del_song_{mp3}", help=f"Delete {mp3}"):
                     st.session_state[f"confirm_del_song_{mp3}"] = True
                 
@@ -901,7 +1294,10 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                     yc, nc = st.columns(2)
                     if yc.button("✅ Yes, Delete", key=f"yes_del_song_{mp3}"):
                         try:
-                            os.remove(mp3)
+                            if supabase_client:
+                                supabase_client.storage.from_(STORAGE_BUCKET).remove([mp3])
+                            if os.path.exists(mp3):
+                                os.remove(mp3)
                             st.toast(f"🗑️ '{mp3}' deleted.", icon="🗑️")
                             st.session_state[f"confirm_del_song_{mp3}"] = False
                             import time; time.sleep(0.5)
@@ -985,12 +1381,20 @@ if menu == "Daily Entry":
             new_act_type = st.selectbox("Activity Type", ["Productive", "Essential", "Waste"], index=2,
                                         help="Productive = Study/Work | Essential = Must-do | Waste = Time sink")
         with new_act_col3:
-            new_track_type = st.selectbox("Track by", ["Hours", "Expense (₹)"])
+            _new_track_mode = st.selectbox(
+                "Tracking Mode",
+                ["Hours only", "Expense + Hours"],
+                help="Hours only: tracks time duration only. Expense + Hours: tracks both expense amount (₹) AND time duration."
+            )
+        # Map friendly label → DB value
+        new_track_type = "Expense (₹)" if _new_track_mode == "Expense + Hours" else "Hours"
+        if _new_track_mode == "Expense + Hours":
+            st.info("ℹ️ This activity will require both an **Expense amount (₹)** AND a **Time Duration** entry each time it is logged.")
         if st.button("Save Activity"):
             if new.strip():
                 c.execute("INSERT INTO custom_boxes(name, username, activity_type, tracking_type) VALUES(%s, %s, %s, %s)", (new.strip(), USER, new_act_type, new_track_type))
                 conn.commit()
-                st.toast(f"✅ Activity '{new.strip()}' added as **{new_act_type}** tracked in **{new_track_type}**!", icon="✅")
+                st.toast(f"✅ Activity '{new.strip()}' added as **{new_act_type}** tracked in **{_new_track_mode}**!", icon="✅")
                 import time; time.sleep(1)
                 st.rerun()
             else:
@@ -1106,8 +1510,14 @@ if menu == "Daily Entry":
     _track_by_expense = activity in ["Food", "Transport"]
     
     if activity in custom:
-        _track_by_expense = custom_track_map.get(activity, "Hours") == "Expense (₹)"
-        _track_both = False
+        _custom_track = custom_track_map.get(activity, "Hours")
+        if _custom_track == "Expense (₹)":
+            # Expense + Hours mode: show both amount AND time duration
+            _track_both = True
+            _track_by_expense = False
+        else:
+            _track_both = False
+            _track_by_expense = False
     
     # Duration input mode selection (Hours vs Time Range)
     _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=1, horizontal=True, key=f"de_dur_mode_{activity}")
@@ -2762,91 +3172,37 @@ elif menu == "Productivity Analysis":
                 fig_wl.update_layout(title="Daily Waste Trend", xaxis_title="Date", yaxis_title="Hours")
                 st.plotly_chart(fig_wl, width='stretch', key="daily_waste_line")
 
+                # ── Hourly Distribution ──
+                st.markdown("#### ⏰ Hourly Distribution")
+                _wdf_h = _filtered_waste_df.copy()
+                _wdf_h['_hour'] = _wdf_h.apply(extract_hour_from_row, axis=1)
+                _wdf_h_valid = _wdf_h.dropna(subset=['_hour'])
+                if not _wdf_h_valid.empty:
+                    _wh_grp = _wdf_h_valid.groupby('_hour')['duration'].sum().reset_index()
+                    _wh_all = pd.DataFrame({'_hour': range(24)})
+                    _wh_all['_hour_label'] = _wh_all['_hour'].apply(lambda h: f"{h:02d}:00")
+                    _wh_full = _wh_all.merge(_wh_grp[['_hour', 'duration']], on='_hour', how='left').fillna(0)
+                    _fig_wh = go.Figure()
+                    _fig_wh.add_trace(go.Scatter(
+                        x=_wh_full['_hour_label'], y=_wh_full['duration'],
+                        mode='lines+markers', name='Waste',
+                        line=dict(color='#f97316', width=3),
+                        fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
+                        marker=dict(size=6, color='#fb923c')
+                    ))
+                    _fig_wh.update_layout(
+                        title="Hourly Waste Distribution",
+                        xaxis_title="Hour of Day", yaxis_title="Hours",
+                        template='plotly_dark', hovermode='x unified',
+                        xaxis_tickangle=-45
+                    )
+                    st.plotly_chart(_fig_wh, width='stretch', key="daily_waste_hourly_dist")
+                else:
+                    st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
+
                 st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
 
-                # ── WASTE ACTIVITY TREND ─────────────────────────────────────
-                st.markdown("---")
-                st.markdown("### 📉 Waste Activity Trend")
-                st.markdown("*Select a specific waste activity to see its detailed trend across hours, days, and months.*")
 
-                # Use filtered types for the trend selector
-                _daily_waste_types = sorted(_filtered_waste_df['type'].unique().tolist())
-                if _daily_waste_types:
-                    _sel_waste_act_d = st.selectbox(
-                        "🔍 Select Activity for Detailed Trend",
-                        _daily_waste_types,
-                        index=0,
-                        key="daily_waste_act_sel"
-                    )
-                    _act_df_d = _filtered_waste_df[_filtered_waste_df['type'] == _sel_waste_act_d].copy()
-
-                    # --- Hourly Distribution ---
-                    st.markdown(f"#### ⏰ Hourly Distribution — *{_sel_waste_act_d}*")
-                    _act_df_d['_hour'] = _act_df_d.apply(extract_hour_from_row, axis=1)
-                    _hourly_d = _act_df_d.dropna(subset=['_hour'])
-                    if not _hourly_d.empty:
-                        _hourly_grp_d = _hourly_d.groupby('_hour')['duration'].sum().reset_index()
-                        _hourly_grp_d['_hour_label'] = _hourly_grp_d['_hour'].apply(lambda h: f"{int(h):02d}:00")
-                        _hourly_grp_d = _hourly_grp_d.sort_values('_hour')
-
-                        # Build a full 24-hour series (fill missing hours with 0)
-                        _all_hours_d = pd.DataFrame({'_hour': range(24)})
-                        _all_hours_d['_hour_label'] = _all_hours_d['_hour'].apply(lambda h: f"{h:02d}:00")
-                        _full_24_d = _all_hours_d.merge(
-                            _hourly_grp_d[['_hour', 'duration']], on='_hour', how='left'
-                        ).fillna(0)
-
-                        _hcol1_d, _hcol2_d = st.columns(2)
-                        with _hcol1_d:
-                            _fig_h_d = px.bar(_hourly_grp_d, x='_hour_label', y='duration',
-                                              labels={'_hour_label': 'Hour of Day', 'duration': 'Hours'},
-                                              color_discrete_sequence=['#f97316'],
-                                              title=f"{_sel_waste_act_d} — Bar (logged hours only)")
-                            _fig_h_d.update_layout(template='plotly_dark', xaxis_tickangle=-45, height=380)
-                            st.plotly_chart(_fig_h_d, width='stretch', key=f"daily_wat_hourly_bar_{_sel_waste_act_d}")
-                        with _hcol2_d:
-                            _fig_h_line_d = go.Figure()
-                            _fig_h_line_d.add_trace(go.Scatter(
-                                x=_full_24_d['_hour_label'], y=_full_24_d['duration'],
-                                mode='lines+markers', name=_sel_waste_act_d,
-                                line=dict(color='#f97316', width=3),
-                                fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
-                                marker=dict(size=6, color='#fb923c')
-                            ))
-                            _fig_h_line_d.update_layout(
-                                title=f"{_sel_waste_act_d} — Line (all 24 hours)",
-                                xaxis_title="Hour of Day", yaxis_title="Hours",
-                                template='plotly_dark', hovermode='x unified',
-                                height=380, xaxis_tickangle=-45
-                            )
-                            st.plotly_chart(_fig_h_line_d, width='stretch', key=f"daily_wat_hourly_line_{_sel_waste_act_d}")
-                    else:
-                        st.caption("No time-stamped entries for this activity (log activities with 'Time Range (From-To)' to see hourly data).")
-
-                    # --- Day-wise Trend ---
-                    st.markdown(f"#### 📅 Day-wise Trend — *{_sel_waste_act_d}*")
-                    _daywise_d = _act_df_d.groupby('date')['duration'].sum().reset_index().sort_values('date')
-                    if not _daywise_d.empty:
-                        _fig_day_d = go.Figure()
-                        _fig_day_d.add_trace(go.Scatter(
-                            x=_daywise_d['date'], y=_daywise_d['duration'],
-                            mode='lines+markers', name=_sel_waste_act_d,
-                            line=dict(color='#f97316', width=3),
-                            fill='tozeroy', fillcolor='rgba(249,115,22,0.12)',
-                            marker=dict(size=7)
-                        ))
-                        _fig_day_d.update_layout(
-                            title=f"{_sel_waste_act_d} — Day-wise Trend",
-                            xaxis_title="Date", yaxis_title="Hours",
-                            template='plotly_dark', hovermode='x unified'
-                        )
-                        st.plotly_chart(_fig_day_d, width='stretch', key=f"daily_wat_daywise_{_sel_waste_act_d}")
-                    else:
-                        st.caption("No day-wise data available.")
-
-
-                else:
-                    st.caption("No waste activities found to analyze.")
 
             st.divider()
 
@@ -3105,88 +3461,37 @@ elif menu == "Productivity Analysis":
                                           xaxis_title="Date", yaxis_title="Hours")
                     st.plotly_chart(fig_wml, width='stretch', key=f"monthly_waste_line_{month_str}")
 
+                    # ── Hourly Distribution ──
+                    st.markdown("#### ⏰ Hourly Distribution")
+                    _wdf_hm = _filtered_waste_m.copy()
+                    _wdf_hm['_hour'] = _wdf_hm.apply(extract_hour_from_row, axis=1)
+                    _wdf_hm_valid = _wdf_hm.dropna(subset=['_hour'])
+                    if not _wdf_hm_valid.empty:
+                        _whm_grp = _wdf_hm_valid.groupby('_hour')['duration'].sum().reset_index()
+                        _whm_all = pd.DataFrame({'_hour': range(24)})
+                        _whm_all['_hour_label'] = _whm_all['_hour'].apply(lambda h: f"{h:02d}:00")
+                        _whm_full = _whm_all.merge(_whm_grp[['_hour', 'duration']], on='_hour', how='left').fillna(0)
+                        _fig_whm = go.Figure()
+                        _fig_whm.add_trace(go.Scatter(
+                            x=_whm_full['_hour_label'], y=_whm_full['duration'],
+                            mode='lines+markers', name='Waste',
+                            line=dict(color='#f97316', width=3),
+                            fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
+                            marker=dict(size=6, color='#fb923c')
+                        ))
+                        _fig_whm.update_layout(
+                            title=f"Hourly Waste Distribution — {month_str}",
+                            xaxis_title="Hour of Day", yaxis_title="Hours",
+                            template='plotly_dark', hovermode='x unified',
+                            xaxis_tickangle=-45
+                        )
+                        st.plotly_chart(_fig_whm, width='stretch', key=f"monthly_waste_hourly_dist_{month_str}")
+                    else:
+                        st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
+
                     st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
 
-                    # ── WASTE ACTIVITY TREND (Monthly) ──────────────────────────────
-                    st.markdown("---")
-                    st.markdown("### 📉 Waste Activity Trend")
-                    st.markdown("*Select a specific waste activity to see its detailed trend for the selected month.*")
 
-                    _monthly_waste_types = sorted(_filtered_waste_m['type'].unique().tolist())
-                    if _monthly_waste_types:
-                        _sel_waste_act_m = st.selectbox(
-                            "🔍 Select Activity for Detailed Trend",
-                            _monthly_waste_types,
-                            key=f"monthly_waste_act_sel_{month_str}"
-                        )
-                        _act_df_m = _filtered_waste_m[_filtered_waste_m['type'] == _sel_waste_act_m].copy()
-
-                        # --- Hourly Distribution ---
-                        st.markdown(f"#### ⏰ Hourly Distribution — *{_sel_waste_act_m}*")
-                        _act_df_m['_hour'] = _act_df_m.apply(extract_hour_from_row, axis=1)
-                        _hourly_m = _act_df_m.dropna(subset=['_hour'])
-                        if not _hourly_m.empty:
-                            _hourly_grp_m = _hourly_m.groupby('_hour')['duration'].sum().reset_index()
-                            _hourly_grp_m['_hour_label'] = _hourly_grp_m['_hour'].apply(lambda h: f"{int(h):02d}:00")
-                            _hourly_grp_m = _hourly_grp_m.sort_values('_hour')
-
-                            # Build a full 24-hour series (fill missing hours with 0)
-                            _all_hours_m = pd.DataFrame({'_hour': range(24)})
-                            _all_hours_m['_hour_label'] = _all_hours_m['_hour'].apply(lambda h: f"{h:02d}:00")
-                            _full_24_m = _all_hours_m.merge(
-                                _hourly_grp_m[['_hour', 'duration']], on='_hour', how='left'
-                            ).fillna(0)
-
-                            _hcol1_m, _hcol2_m = st.columns(2)
-                            with _hcol1_m:
-                                _fig_h_m = px.bar(_hourly_grp_m, x='_hour_label', y='duration',
-                                                  labels={'_hour_label': 'Hour of Day', 'duration': 'Hours'},
-                                                  color_discrete_sequence=['#f97316'],
-                                                  title=f"{_sel_waste_act_m} — Bar (logged hours only)")
-                                _fig_h_m.update_layout(template='plotly_dark', xaxis_tickangle=-45, height=380)
-                                st.plotly_chart(_fig_h_m, width='stretch', key=f"monthly_wat_hourly_bar_{_sel_waste_act_m}_{month_str}")
-                            with _hcol2_m:
-                                _fig_h_line_m = go.Figure()
-                                _fig_h_line_m.add_trace(go.Scatter(
-                                    x=_full_24_m['_hour_label'], y=_full_24_m['duration'],
-                                    mode='lines+markers', name=_sel_waste_act_m,
-                                    line=dict(color='#f97316', width=3),
-                                    fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
-                                    marker=dict(size=6, color='#fb923c')
-                                ))
-                                _fig_h_line_m.update_layout(
-                                    title=f"{_sel_waste_act_m} — Line (all 24 hours)",
-                                    xaxis_title="Hour of Day", yaxis_title="Hours",
-                                    template='plotly_dark', hovermode='x unified',
-                                    height=380, xaxis_tickangle=-45
-                                )
-                                st.plotly_chart(_fig_h_line_m, width='stretch', key=f"monthly_wat_hourly_line_{_sel_waste_act_m}_{month_str}")
-                        else:
-                            st.caption("No time-stamped entries for this activity. Log with 'Time Range (From-To)' to see hourly data.")
-
-                        # --- Day-wise Trend ---
-                        st.markdown(f"#### 📅 Day-wise Trend — *{_sel_waste_act_m}*")
-                        _daywise_m = _act_df_m.groupby('date')['duration'].sum().reset_index().sort_values('date')
-                        if not _daywise_m.empty:
-                            _fig_day_m = go.Figure()
-                            _fig_day_m.add_trace(go.Scatter(
-                                x=_daywise_m['date'], y=_daywise_m['duration'],
-                                mode='lines+markers', name=_sel_waste_act_m,
-                                line=dict(color='#f97316', width=3),
-                                fill='tozeroy', fillcolor='rgba(249,115,22,0.12)',
-                                marker=dict(size=7)
-                            ))
-                            _fig_day_m.update_layout(
-                                title=f"{_sel_waste_act_m} — Day-wise Trend ({month_str})",
-                                xaxis_title="Date", yaxis_title="Hours",
-                                template='plotly_dark', hovermode='x unified'
-                            )
-                            st.plotly_chart(_fig_day_m, width='stretch', key=f"monthly_wat_daywise_{_sel_waste_act_m}_{month_str}")
-                        else:
-                            st.caption("No day-wise data available.")
-
-                    else:
-                        st.caption("No waste activities found for this month.")
 
                 st.divider()
                 st.markdown(f"### 📈 Advanced Monthly Insights — {month_str}")
@@ -3510,86 +3815,35 @@ elif menu == "Productivity Analysis":
                                           xaxis_title="Month", yaxis_title="Hours")
                     st.plotly_chart(fig_ywl, width='stretch', key=f"yearly_waste_line_{int(sel_year_y)}")
 
-                    # ── WASTE ACTIVITY TREND (Yearly) ────────────────────────────────
-                    st.markdown("---")
-                    st.markdown("### 📉 Waste Activity Trend")
-                    st.markdown("*Select a specific waste activity to see its detailed trend for the selected year.*")
-
-                    _yearly_waste_types = sorted(_filtered_waste_y['type'].unique().tolist())
-                    if _yearly_waste_types:
-                        _sel_waste_act_y = st.selectbox(
-                            "🔍 Select Activity for Detailed Trend",
-                            _yearly_waste_types,
-                            key=f"yearly_waste_act_sel_{int(sel_year_y)}"
+                    # ── Hourly Distribution ──
+                    st.markdown("#### ⏰ Hourly Distribution")
+                    _wdf_hy = _filtered_waste_y.copy()
+                    _wdf_hy['_hour'] = _wdf_hy.apply(extract_hour_from_row, axis=1)
+                    _wdf_hy_valid = _wdf_hy.dropna(subset=['_hour'])
+                    if not _wdf_hy_valid.empty:
+                        _why_grp = _wdf_hy_valid.groupby('_hour')['duration'].sum().reset_index()
+                        _why_all = pd.DataFrame({'_hour': range(24)})
+                        _why_all['_hour_label'] = _why_all['_hour'].apply(lambda h: f"{h:02d}:00")
+                        _why_full = _why_all.merge(_why_grp[['_hour', 'duration']], on='_hour', how='left').fillna(0)
+                        _fig_why = go.Figure()
+                        _fig_why.add_trace(go.Scatter(
+                            x=_why_full['_hour_label'], y=_why_full['duration'],
+                            mode='lines+markers', name='Waste',
+                            line=dict(color='#f97316', width=3),
+                            fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
+                            marker=dict(size=6, color='#fb923c')
+                        ))
+                        _fig_why.update_layout(
+                            title=f"Hourly Waste Distribution — {int(sel_year_y)}",
+                            xaxis_title="Hour of Day", yaxis_title="Hours",
+                            template='plotly_dark', hovermode='x unified',
+                            xaxis_tickangle=-45
                         )
-                        _act_df_y = _filtered_waste_y[_filtered_waste_y['type'] == _sel_waste_act_y].copy()
-
-                        # --- Hourly Distribution ---
-                        st.markdown(f"#### ⏰ Hourly Distribution — *{_sel_waste_act_y}*")
-                        _act_df_y['_hour'] = _act_df_y.apply(extract_hour_from_row, axis=1)
-                        _hourly_y = _act_df_y.dropna(subset=['_hour'])
-                        if not _hourly_y.empty:
-                            _hourly_grp_y = _hourly_y.groupby('_hour')['duration'].sum().reset_index()
-                            _hourly_grp_y['_hour_label'] = _hourly_grp_y['_hour'].apply(lambda h: f"{int(h):02d}:00")
-                            _hourly_grp_y = _hourly_grp_y.sort_values('_hour')
-
-                            # Build a full 24-hour series (fill missing hours with 0)
-                            _all_hours_y = pd.DataFrame({'_hour': range(24)})
-                            _all_hours_y['_hour_label'] = _all_hours_y['_hour'].apply(lambda h: f"{h:02d}:00")
-                            _full_24_y = _all_hours_y.merge(
-                                _hourly_grp_y[['_hour', 'duration']], on='_hour', how='left'
-                            ).fillna(0)
-
-                            _hcol1_y, _hcol2_y = st.columns(2)
-                            with _hcol1_y:
-                                _fig_h_y = px.bar(_hourly_grp_y, x='_hour_label', y='duration',
-                                                  labels={'_hour_label': 'Hour of Day', 'duration': 'Hours'},
-                                                  color_discrete_sequence=['#f97316'],
-                                                  title=f"{_sel_waste_act_y} — Bar (logged hours only)")
-                                _fig_h_y.update_layout(template='plotly_dark', xaxis_tickangle=-45, height=380)
-                                st.plotly_chart(_fig_h_y, width='stretch', key=f"yearly_wat_hourly_bar_{_sel_waste_act_y}_{int(sel_year_y)}")
-                            with _hcol2_y:
-                                _fig_h_line_y = go.Figure()
-                                _fig_h_line_y.add_trace(go.Scatter(
-                                    x=_full_24_y['_hour_label'], y=_full_24_y['duration'],
-                                    mode='lines+markers', name=_sel_waste_act_y,
-                                    line=dict(color='#f97316', width=3),
-                                    fill='tozeroy', fillcolor='rgba(249,115,22,0.15)',
-                                    marker=dict(size=6, color='#fb923c')
-                                ))
-                                _fig_h_line_y.update_layout(
-                                    title=f"{_sel_waste_act_y} — Line (all 24 hours)",
-                                    xaxis_title="Hour of Day", yaxis_title="Hours",
-                                    template='plotly_dark', hovermode='x unified',
-                                    height=380, xaxis_tickangle=-45
-                                )
-                                st.plotly_chart(_fig_h_line_y, width='stretch', key=f"yearly_wat_hourly_line_{_sel_waste_act_y}_{int(sel_year_y)}")
-                        else:
-                            st.caption("No time-stamped entries for this activity. Log with 'Time Range (From-To)' to see hourly data.")
-
-                        # --- Day-wise Trend ---
-                        st.markdown(f"#### 📅 Day-wise Trend — *{_sel_waste_act_y}*")
-                        _daywise_y = _act_df_y.groupby('date')['duration'].sum().reset_index().sort_values('date')
-                        if not _daywise_y.empty:
-                            _fig_day_y = go.Figure()
-                            _fig_day_y.add_trace(go.Scatter(
-                                x=_daywise_y['date'], y=_daywise_y['duration'],
-                                mode='lines+markers', name=_sel_waste_act_y,
-                                line=dict(color='#f97316', width=3),
-                                fill='tozeroy', fillcolor='rgba(249,115,22,0.12)',
-                                marker=dict(size=7)
-                            ))
-                            _fig_day_y.update_layout(
-                                title=f"{_sel_waste_act_y} — Day-wise Trend ({int(sel_year_y)})",
-                                xaxis_title="Date", yaxis_title="Hours",
-                                template='plotly_dark', hovermode='x unified'
-                            )
-                            st.plotly_chart(_fig_day_y, width='stretch', key=f"yearly_wat_daywise_{_sel_waste_act_y}_{int(sel_year_y)}")
-                        else:
-                            st.caption("No day-wise data available.")
-
+                        st.plotly_chart(_fig_why, width='stretch', key=f"yearly_waste_hourly_dist_{int(sel_year_y)}")
                     else:
-                        st.caption("No waste activities found for this year.")
+                        st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
+
+
 
                 st.divider()
                 st.markdown(f"### 📈 Advanced Yearly Insights — {int(sel_year_y)}")

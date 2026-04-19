@@ -7,19 +7,46 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
-        DATABASE_URL = st.secrets["DATABASE_URL"]
-    else:
-        DATABASE_URL = os.environ.get("DATABASE_URL")
-except Exception:
-    DATABASE_URL = os.environ.get("DATABASE_URL")
+# Prioritize .env/Environment variables for local development
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
+# Fallback to Streamlit secrets (for cloud deployment)
+if not DATABASE_URL:
+    try:
+        if hasattr(st, "secrets"):
+            # Try to get DATABASE_URL directly
+            if "DATABASE_URL" in st.secrets:
+                DATABASE_URL = st.secrets["DATABASE_URL"]
+            # Or from a [database] section
+            elif "database" in st.secrets:
+                db_sect = st.secrets["database"]
+                if isinstance(db_sect, str):
+                    DATABASE_URL = db_sect
+                elif hasattr(db_sect, "get"):
+                    DATABASE_URL = db_sect.get("url") or db_sect.get("DATABASE_URL")
+    except Exception:
+        pass
+
+# Fallback to individual components if URL is still not found
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_NAME = os.environ.get("DB_NAME", "study_tracker")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASS = os.environ.get("DB_PASS", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
+
+# Supabase Storage Configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+STORAGE_BUCKET = "songs"
+
+from supabase import create_client, Client
+supabase_client: Client = None
+
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"Failed to initialize Supabase client: {e}")
 
 import time
 
