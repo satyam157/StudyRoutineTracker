@@ -59,13 +59,66 @@ st.markdown("""
         border-radius: 10px;
     }
 
-    /* --- Media Player main page card (class-scoped, safe) --- */
-    .media-player-card {
-        background: linear-gradient(160deg, #161b22 0%, #0d1117 100%);
-        border: 1px solid #30363d;
-        border-radius: 20px;
-        padding: 25px;
-        box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+    /* --- Song Selectbox (Premium Dark Look) --- */
+    /* Sidebar Scoped */
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        background-color: #0d1117 !important;
+        color: #f0f6fc !important;
+        border: 1px solid #30363d !important;
+        border-radius: 10px !important;
+        font-size: 0.85rem !important;
+        transition: all 0.2s ease;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"]:hover > div {
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 0 1px #38bdf8 !important;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] svg {
+        fill: #38bdf8 !important;
+    }
+    [data-testid="stSidebar"] .element-container:has(#sidebar-music-marker) ~ .element-container div[data-testid="stSelectbox"] [data-testid="stMarkdownContainer"] p {
+        color: #8b949e !important;
+        font-size: 0.75rem !important;
+    }
+
+    /* Media Player Page Scoped */
+    .element-container:has(#media-player-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        background-color: #0d1117 !important;
+        color: #f0f6fc !important;
+        border: 1px solid #334155 !important;
+        border-radius: 12px !important;
+        padding: 5px 10px !important;
+    }
+    .element-container:has(#media-player-marker) ~ .element-container div[data-testid="stSelectbox"] [data-baseweb="select"]:hover > div {
+        border-color: #38bdf8 !important;
+    }
+
+    /* --- Dropdown Menu (Global but specific to BaseWeb popovers) --- */
+    /* Note: Streamlit portals popovers to the body, making them hard to isolate. 
+       We apply a dark theme to all popovers which fits the 'Premium' aesthetic. */
+    div[data-baseweb="popover"] {
+        background-color: transparent !important;
+    }
+    div[data-baseweb="popover"] ul {
+        background-color: #0d1117 !important;
+        border: 1px solid #30363d !important;
+        border-radius: 12px !important;
+        padding: 8px !important;
+    }
+    div[data-baseweb="popover"] li {
+        background-color: transparent !important;
+        color: #c9d1d9 !important;
+        border-radius: 6px !important;
+        margin: 2px 0 !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-baseweb="popover"] li:hover {
+        background-color: #161b22 !important;
+        color: #38bdf8 !important;
+    }
+    div[data-baseweb="popover"] li[aria-selected="true"] {
+        background-color: rgba(56, 189, 248, 0.1) !important;
+        color: #38bdf8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -210,8 +263,40 @@ USER_CONFIG = get_user_config(USER)
 import os
 import re
 import random as _rand
+from database import supabase_client, STORAGE_BUCKET
 
-all_mp3s = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+# Helper to get songs from Supabase Storage + Local fallback
+def get_all_songs():
+    local_songs = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+    
+    if not supabase_client:
+        return local_songs
+    
+    try:
+        res = supabase_client.storage.from_(STORAGE_BUCKET).list()
+        if isinstance(res, list):
+            cloud_songs = [f['name'] for f in res if f['name'].lower().endswith(".mp3")]
+            # Combine and remove duplicates
+            return list(set(local_songs + cloud_songs))
+        return local_songs
+    except Exception as e:
+        print(f"Error listing Supabase songs: {e}")
+        return local_songs
+
+def get_song_url(filename):
+    # Check if file exists locally first
+    if os.path.exists(filename):
+        return filename
+    
+    if not supabase_client:
+        return filename
+        
+    try:
+        return supabase_client.storage.from_(STORAGE_BUCKET).get_public_url(filename)
+    except:
+        return filename
+
+all_mp3s = get_all_songs()
 
 def clean_song_name(filename):
     name = filename.replace(".mp3", "")
@@ -231,6 +316,7 @@ if "Perfect.mp3" in all_mp3s:
 else:
     all_mp3s.sort()
 
+# Dictionary of {CleanName: Filename}
 song_options_dict = {clean_song_name(f): f for f in all_mp3s} if all_mp3s else {}
 song_names_list = list(song_options_dict.keys())
 
@@ -250,7 +336,7 @@ if "music_play_triggered" not in st.session_state:
 def _render_music_player(is_mylove=False):
     """Render the sidebar music player with warm light-colored scrollable song list."""
     if not song_names_list:
-        st.sidebar.info("No .mp3 files found in root directory.")
+        st.sidebar.info("🎵 No .mp3 files found in Cloud Storage or Local Directory.")
         st.sidebar.divider()
         return
 
@@ -327,9 +413,21 @@ def _render_music_player(is_mylove=False):
     if st.session_state.music_idx >= len(song_names_list):
         st.session_state.music_idx = 0
 
-    # The detailed song list and selector have been removed from the sidebar.
-    # Users will select songs from the Media Player page instead.
-    
+    # --- Song Selector Dropdown ---
+    def _on_sidebar_sel_change():
+        if st.session_state.sidebar_song_selector in song_names_list:
+            st.session_state.music_idx = song_names_list.index(st.session_state.sidebar_song_selector)
+            st.session_state.music_playing = True
+
+    st.sidebar.selectbox(
+        "Select Song",
+        options=song_names_list,
+        index=st.session_state.music_idx,
+        key="sidebar_song_selector",
+        on_change=_on_sidebar_sel_change,
+        label_visibility="collapsed"
+    )
+
     current_song_path = song_options_dict[song_names_list[st.session_state.music_idx]]
     st.sidebar.markdown(f"""
         <div style="background-color: #161b22; padding: 10px; border-radius: 8px; border-left: 3px solid #38bdf8; margin-bottom: 10px;">
@@ -342,7 +440,7 @@ def _render_music_player(is_mylove=False):
     
     # Auto-play only on MyLove Special or if already started by user
     should_autoplay = is_mylove or st.session_state.music_playing
-    st.sidebar.audio(current_song_path, format="audio/mp3", autoplay=should_autoplay)
+    st.sidebar.audio(get_song_url(current_song_path), format="audio/mp3", autoplay=should_autoplay)
 
     # --- JS: actually stop or start the audio element in the browser ---
     if st.session_state.get("music_stop_triggered"):
@@ -658,7 +756,7 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             """, unsafe_allow_html=True)
 
             _current_mp_path = song_options_dict[song_names_list[st.session_state.music_idx]]
-            st.audio(_current_mp_path, format="audio/mp3", autoplay=st.session_state.music_playing)
+            st.audio(get_song_url(_current_mp_path), format="audio/mp3", autoplay=st.session_state.music_playing)
 
         with _np_controls:
             def _mp_next():
@@ -786,7 +884,7 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             </script>
             """, unsafe_allow_javascript=True)
     else:
-        st.info("No .mp3 files found in the project directory.")
+        st.info("🎵 No .mp3 files found. Try downloading or uploading one above!")
 
     st.divider()
 
@@ -809,35 +907,96 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
         yt_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
         custom_name = st.text_input("Custom filename (optional)", placeholder="Leave blank to use video title")
         
+        # --- Advanced Settings for bypassing blocks ---
+        with st.expander("🛠️ Advanced Settings (Bypass 403 Forbidden)"):
+            st.markdown("""
+            YouTube often blocks requests from cloud servers. If you get a **403 Forbidden** error:
+            1. Use a **Cookies** file (Netscape format). Use 'Get cookies.txt' extension.
+            2. Or try a different video.
+            """)
+            cookie_text = st.text_area("Paste Cookies Content", height=100, help="Paste the content of your cookies.txt here.")
+            force_update = st.checkbox("Force update yt-dlp & ffmpeg before download", value=False)
+            col_client, col_mobile = st.columns(2)
+            with col_client:
+                player_client = st.selectbox("Player Client", ["ios", "android", "web", "mweb", "tv"], index=0, help="Changing this can help if a video is blocked or signature fails.")
+            with col_mobile:
+                use_mobile_client = st.checkbox("Use Selected Client", value=True)
+            
+            st.info("💡 **Tip:** If you see 'n challenge solving failed', ensure you have **Node.js** installed on your server/computer. I've added it to `packages.txt` for Streamlit Cloud.")
+
         if st.button("⬇️ Download as MP3", type="primary", width='stretch'):
             if yt_url.strip():
                 import subprocess
-                import shutil
+                import sys
+                import os
+                import tempfile
                 
-                # Check if yt-dlp is available
-                if not shutil.which("yt-dlp"):
-                    st.warning("⏳ Installing yt-dlp... this may take a moment.")
-                    try:
-                        subprocess.run(["pip", "install", "yt-dlp"], check=True, capture_output=True)
-                        st.success("✅ yt-dlp installed!")
-                    except Exception as e:
-                        st.error(f"Failed to install yt-dlp: {e}")
-                        st.stop()
+                # Update only if forced or if it's the first time
+                if force_update:
+                    with st.spinner("🎵 Updating downloader tools..."):
+                        try:
+                            subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "static-ffmpeg"], check=True, capture_output=True)
+                        except Exception as e:
+                            st.warning(f"Update failed: {e}")
                 
+                # Try to locate ffmpeg from static-ffmpeg
+                ffmpeg_location = None
+                try:
+                    import static_ffmpeg
+                    # On Windows, static-ffmpeg typically extracts to a 'bin/win32' or 'bin' folder
+                    pkg_dir = os.path.dirname(static_ffmpeg.__file__)
+                    potential_bins = [
+                        os.path.join(pkg_dir, "bin", "win32"),
+                        os.path.join(pkg_dir, "bin"),
+                        os.path.join(pkg_dir, "static_ffmpeg", "bin", "win32")
+                    ]
+                    ffmpeg_exe = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
+                    for pb in potential_bins:
+                        if os.path.exists(os.path.join(pb, ffmpeg_exe)):
+                            ffmpeg_location = pb
+                            break
+                except:
+                    pass
+
                 with st.spinner("🎵 Downloading and converting to MP3..."):
                     try:
                         output_template = f"{custom_name.strip()}.%(ext)s" if custom_name.strip() else "%(title)s.%(ext)s"
                         
+                        # Create temporary cookie file if provided
+                        cookie_file_path = None
+                        if cookie_text.strip():
+                            fd, cookie_file_path = tempfile.mkstemp(suffix=".txt")
+                            with os.fdopen(fd, 'w') as tmp:
+                                tmp.write(cookie_text.strip())
+
+                        # Build the command with anti-block measures
                         cmd = [
-                            "yt-dlp",
+                            sys.executable, "-m", "yt_dlp",
                             "-x",
                             "--audio-format", "mp3",
                             "--audio-quality", "192K",
                             "-o", output_template,
                             "--no-playlist",
+                            "--no-check-certificate",
+                            "--prefer-free-formats",
+                            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                        ]
+                        
+                        # Add cookies if available
+                        if cookie_file_path:
+                            cmd.extend(["--cookies", cookie_file_path])
+                            
+                        # Add extractor args to bypass blocks
+                        if use_mobile_client:
+                            cmd.extend(["--extractor-args", f"youtube:player_client={player_client},web"])
+                        
+                        if ffmpeg_location:
+                            cmd.extend(["--ffmpeg-location", ffmpeg_location])
+                        
+                        cmd.extend([
                             "--restrict-filenames" if not custom_name.strip() else "--no-restrict-filenames",
                             yt_url.strip()
-                        ]
+                        ])
                         
                         result = subprocess.run(
                             cmd,
@@ -846,19 +1005,52 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                             timeout=300
                         )
                         
+                        # Cleanup cookie file
+                        if cookie_file_path and os.path.exists(cookie_file_path):
+                            try: os.remove(cookie_file_path)
+                            except: pass
+                        
                         if result.returncode == 0:
-                            # Find the newly downloaded file
-                            import glob
-                            new_mp3s = set(glob.glob("*.mp3")) - set(all_mp3s)
-                            if new_mp3s:
-                                new_file = list(new_mp3s)[0]
-                                st.success(f"✅ Downloaded: **{new_file}**")
-                                st.balloons()
-                                st.info("🔄 Refresh the page to see it in the music player.")
-                            else:
-                                st.success("✅ Download complete! Refresh to see the new song.")
+                            # Upload to Supabase if available
+                            downloaded_file = None
+                            for f in os.listdir("."):
+                                if f.lower().endswith(".mp3") and (custom_name.strip() in f or custom_name.strip() == ""):
+                                    # This is a bit loose, but yt-dlp might change filenames slightly
+                                    # Let's find the most recent mp3
+                                    downloaded_file = f
+                                    break
+                            
+                            if downloaded_file and supabase_client:
+                                with st.spinner("☁️ Uploading to Supabase Storage..."):
+                                    try:
+                                        with open(downloaded_file, "rb") as f:
+                                            supabase_client.storage.from_(STORAGE_BUCKET).upload(
+                                                path=downloaded_file,
+                                                file=f,
+                                                file_options={"content-type": "audio/mpeg"}
+                                            )
+                                        os.remove(downloaded_file) # Clean up local
+                                        st.success("✅ Uploaded to Supabase!")
+                                    except Exception as upload_err:
+                                        st.warning(f"Local download ok, but Supabase upload failed: {upload_err}")
+
+                            st.success("✅ Download complete! Adding to library...")
+                            st.balloons()
+                            import time
+                            time.sleep(2)
+                            st.rerun()
                         else:
-                            st.error(f"Download failed:\n```\n{result.stderr[-500:]}\n```")
+                            err_msg = result.stderr
+                            if "403: Forbidden" in err_msg:
+                                st.error("❌ **YouTube blocked the request (403 Forbidden).**\n\nYouTube has flagged this server's IP. To fix this:\n1. Expand 'Advanced Settings' above.\n2. Paste your **YouTube Cookies** (Netscape format).\n3. Try again.\n\n*Changing the 'Player Client' in Advanced Settings also helps.*")
+                            elif "n challenge" in err_msg.lower() or "signature" in err_msg.lower():
+                                st.error("❌ **Signature Challenge Failed.**\n\nYouTube is using a new security measure. To fix this:\n1. Ensure **Node.js** is installed on the server.\n2. Try switching 'Player Client' to **Android** or **Web** in Advanced Settings.\n3. Provide **Cookies** to bypass the challenge entirely.")
+                            elif "Requested format is not available" in err_msg:
+                                st.error("❌ **Format not available.**\n\nYouTube is hiding the audio formats for this video from this server. Try using **Cookies** or changing the **Player Client** to **Android**.")
+                            elif "ffmpeg" in err_msg.lower():
+                                st.error("❌ **ffmpeg not found.**\n\nConversion to MP3 failed. I've attempted to install it. Please try again.")
+                            else:
+                                st.error(f"Download failed:\n```\n{err_msg[-500:]}\n```")
                     except subprocess.TimeoutExpired:
                         st.error("⏱️ Download timed out (5 min limit). Try a shorter video.")
                     except Exception as e:
@@ -874,25 +1066,51 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             if not save_name.endswith(".mp3"):
                 save_name += ".mp3"
             if st.button("💾 Save Song", key="save_upload_btn"):
-                with open(save_name, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                st.success(f"✅ Saved as **{save_name}**")
+                if supabase_client:
+                    with st.spinner("☁️ Uploading to Supabase..."):
+                        try:
+                            supabase_client.storage.from_(STORAGE_BUCKET).upload(
+                                path=save_name,
+                                file=uploaded_file.getbuffer().tobytes(),
+                                file_options={"content-type": "audio/mpeg"}
+                            )
+                            st.success(f"✅ Uploaded **{save_name}** to Supabase!")
+                        except Exception as e:
+                            st.error(f"Supabase upload failed: {e}")
+                else:
+                    with open(save_name, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    st.success(f"✅ Saved locally as **{save_name}**")
+                
                 st.balloons()
                 import time; time.sleep(1)
                 st.rerun()
     
     with tab_manage:
         st.markdown("### 📋 Current Song Library")
-        current_mp3s = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+        current_mp3s = get_all_songs()
         if not current_mp3s:
             st.info("No songs found.")
         else:
             st.caption(f"**{len(current_mp3s)}** songs in library")
             for mp3 in sorted(current_mp3s):
-                file_size_mb = os.path.getsize(mp3) / (1024 * 1024)
+                # Try to get size from supabase or local
+                try:
+                    if supabase_client:
+                        # Listing already gave us some info but let's keep it simple
+                        file_size_mb = 0 # Difficult to get size for each without extra calls
+                    else:
+                        file_size_mb = os.path.getsize(mp3) / (1024 * 1024)
+                except:
+                    file_size_mb = 0
+
                 mc1, mc2, mc3 = st.columns([3, 1, 1])
                 mc1.markdown(f"🎵 **{clean_song_name(mp3)}**")
-                mc2.caption(f"{file_size_mb:.1f} MB")
+                if file_size_mb > 0:
+                    mc2.caption(f"{file_size_mb:.1f} MB")
+                else:
+                    mc2.caption("Cloud")
+                
                 if mc3.button("🗑️", key=f"del_song_{mp3}", help=f"Delete {mp3}"):
                     st.session_state[f"confirm_del_song_{mp3}"] = True
                 
@@ -901,7 +1119,10 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                     yc, nc = st.columns(2)
                     if yc.button("✅ Yes, Delete", key=f"yes_del_song_{mp3}"):
                         try:
-                            os.remove(mp3)
+                            if supabase_client:
+                                supabase_client.storage.from_(STORAGE_BUCKET).remove([mp3])
+                            if os.path.exists(mp3):
+                                os.remove(mp3)
                             st.toast(f"🗑️ '{mp3}' deleted.", icon="🗑️")
                             st.session_state[f"confirm_del_song_{mp3}"] = False
                             import time; time.sleep(0.5)

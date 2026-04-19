@@ -8,3 +8,4 @@ SQLAlchemy
 python-dotenv
 supabase
 yt-dlp
+static-ffmpeg
