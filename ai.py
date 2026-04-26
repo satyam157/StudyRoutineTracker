@@ -22,8 +22,9 @@ def _get_api_key() -> str:
     return api_key
 
 
-def get_ai_insight(prompt: str, model_type: str = "heavy") -> str:
-    """Generic Groq call using the only currently available working model."""
+def get_ai_insight(prompt: str, model_type: str = "heavy", max_tokens: int = 4000) -> str:
+    """Generic Groq call with automatic retry on rate limits."""
+    import time as _time
     try:
         from groq import Groq
         
@@ -33,35 +34,45 @@ def get_ai_insight(prompt: str, model_type: str = "heavy") -> str:
         
         client = Groq(api_key=api_key)
         
-        try:
-            res = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=ACTIVE_MODEL,
-                max_tokens=2000,
-                temperature=0.7
-            )
-            
-            if res and res.choices and len(res.choices) > 0:
-                message = res.choices[0].message
-                if message and message.content:
-                    return message.content
-            
-            return "⚠️ Empty response from AI. Please try again."
-            
-        except Exception as e:
-            error_str = str(e)
-            
-            # Specific error messages
-            if "decommissioned" in error_str.lower():
-                return "⚠️ AI model temporarily unavailable. Please try again."
-            elif "authentication" in error_str.lower() or "unauthorized" in error_str.lower():
-                return "⚠️ API authentication failed. Please verify your Groq API key in .env file."
-            elif "rate" in error_str.lower():
-                return "⚠️ Rate limit reached. Please wait a moment and try again."
-            elif "connection" in error_str.lower() or "timeout" in error_str.lower():
-                return "⚠️ Connection error. Please check your internet connection."
-            else:
-                return f"⚠️ AI error: {error_str[:100]}"
+        # Retry up to 3 times on rate limit with exponential backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                res = client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=ACTIVE_MODEL,
+                    max_tokens=max_tokens,
+                    temperature=0.7
+                )
+                
+                if res and res.choices and len(res.choices) > 0:
+                    message = res.choices[0].message
+                    if message and message.content:
+                        return message.content
+                
+                return "⚠️ Empty response from AI. Please try again."
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Rate limit — retry with backoff
+                if "rate" in error_str or "429" in error_str or "too many" in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 15  # 15s, 30s, 45s
+                        _time.sleep(wait_time)
+                        continue
+                    else:
+                        return "⚠️ Rate limit reached after retries. Please wait 1-2 minutes and try again."
+                
+                # Non-retryable errors
+                if "decommissioned" in error_str:
+                    return "⚠️ AI model temporarily unavailable. Please try again."
+                elif "authentication" in error_str or "unauthorized" in error_str:
+                    return "⚠️ API authentication failed. Please verify your Groq API key in .env file."
+                elif "connection" in error_str or "timeout" in error_str:
+                    return "⚠️ Connection error. Please check your internet connection."
+                else:
+                    return f"⚠️ AI error: {str(e)[:100]}"
     
     except ImportError:
         return "⚠️ Groq library not installed. Install with: pip install groq"
@@ -70,17 +81,35 @@ def get_ai_insight(prompt: str, model_type: str = "heavy") -> str:
 
 
 
-
-# ── Target analysis (original) ─────────────────────────────────────────────
+# ── Target analysis ────────────────────────────────────────────────────────
 def analyze_target(target_subject, target_chapters, deadline,
                    days_taken, hours_taken, max_chapter) -> str:
+    total_h = float(hours_taken) if hours_taken else 0
+    total_ch = int(target_chapters) if target_chapters else 1
+    avg_h_per_ch = total_h / max(days_taken, 1)
     prompt = (
-        f"Act as a strict but encouraging study mentor. "
-        f"I have a target to complete '{target_subject}' ({target_chapters} chapters) by {deadline}. "
-        f"So far I have spent {days_taken} separate study days, accumulating {hours_taken} total hours. "
-        f"The chapter that took the most time is '{max_chapter}'. "
-        f"Provide a concise (max 3 sentences) analysis of my progress. "
-        f"Advise if I am spending too much time on a single chapter, or if my pace is good to hit the deadline."
+        f"You are an elite study strategist. Analyze this target and give ACTIONABLE advice.\n\n"
+        f"TARGET DATA:\n"
+        f"- Subject: {target_subject}\n"
+        f"- Total chapters/units: {target_chapters}\n"
+        f"- Deadline: {deadline}\n"
+        f"- Days studied so far: {days_taken}\n"
+        f"- Total hours invested: {hours_taken}h\n"
+        f"- Avg hours/day: {avg_h_per_ch:.1f}h\n"
+        f"- Slowest chapter: '{max_chapter}'\n\n"
+        f"RESPOND WITH THIS EXACT STRUCTURE (use markdown):\n\n"
+        f"## 📊 Progress Verdict\n"
+        f"One bold sentence — on track or behind? By how much?\n\n"
+        f"## ⚡ Smart Adjustments\n"
+        f"| Area | Current | Recommended | Why |\n"
+        f"|------|---------|-------------|-----|\n"
+        f"(fill 3-4 rows: pace, hours/day, chapter strategy, revision)\n\n"
+        f"## 🧠 Smart Work Tips\n"
+        f"- 3 specific techniques (Pomodoro timing, active recall, interleaving, etc.)\n"
+        f"- Each with HOW to apply it to {target_subject}\n\n"
+        f"## 🎯 Action Plan\n"
+        f"Numbered list: exactly what to do this week to get back/stay on track.\n"
+        f"Be specific — chapter names, hours, methods.\n"
     )
     return get_ai_insight(prompt)
 
@@ -90,10 +119,23 @@ def analyze_weak_subjects(subject_hours: dict) -> str:
     subjects_str = ", ".join(
         f"{s}: {h:.1f}h" for s, h in sorted(subject_hours.items(), key=lambda x: x[1])
     )
+    total = sum(subject_hours.values())
     prompt = (
-        f"Act as a study coach. Here are the hours I have spent on each subject: {subjects_str}. "
-        f"In 3-4 sentences, identify which subjects are being neglected, and give specific actionable "
-        f"advice to reallocate study time and cover weak areas before exams."
+        f"You are a smart study strategist. Analyze subject time distribution.\n\n"
+        f"SUBJECT HOURS: {subjects_str}\n"
+        f"TOTAL: {total:.1f}h\n\n"
+        f"RESPOND WITH:\n\n"
+        f"## 📊 Time Distribution Analysis\n"
+        f"| Subject | Hours | % of Total | Verdict | Action |\n"
+        f"|---------|-------|------------|---------|--------|\n"
+        f"(fill for each subject — verdict: ✅ Good / ⚠️ Low / 🔴 Critical)\n\n"
+        f"## 🔄 Rebalancing Strategy\n"
+        f"- Which subjects to increase, by how many hours/week\n"
+        f"- Which subjects to maintain or reduce\n\n"
+        f"## 🧠 Smart Study Techniques\n"
+        f"For the weakest 2-3 subjects, give ONE specific technique each:\n"
+        f"- Active recall, spaced repetition, Feynman method, mind mapping, etc.\n"
+        f"- HOW to apply it (not just the name)\n"
     )
     return get_ai_insight(prompt)
 
@@ -103,10 +145,25 @@ def analyze_waste_time(waste_summary: dict, period: str) -> str:
     waste_str = ", ".join(
         f"{k}: {v:.1f}h" for k, v in sorted(waste_summary.items(), key=lambda x: -x[1])
     )
+    total_waste = sum(waste_summary.values())
     prompt = (
-        f"Act as a productivity coach. During {period} I spent time on these activities: {waste_str}. "
-        f"In 3-4 sentences, identify the biggest time wasters and provide specific, "
-        f"actionable steps to reduce them and redirect that time toward productive study."
+        f"You are a productivity scientist. Analyze waste time data.\n\n"
+        f"PERIOD: {period}\n"
+        f"WASTE BREAKDOWN: {waste_str}\n"
+        f"TOTAL WASTE: {total_waste:.1f}h\n\n"
+        f"RESPOND WITH:\n\n"
+        f"## 🚨 Waste Impact\n"
+        f"| Activity | Hours | Recoverable | Replacement Activity |\n"
+        f"|----------|-------|-------------|---------------------|\n"
+        f"(fill for each waste activity)\n\n"
+        f"## ⚡ Recovery Plan\n"
+        f"| Technique | What To Do | Expected Time Saved | Difficulty |\n"
+        f"|-----------|-----------|---------------------|------------|\n"
+        f"(3-4 specific techniques like time-blocking, phone lock apps, environment design)\n\n"
+        f"## 🧠 Behavioral Hacks\n"
+        f"3 psychology-backed techniques to break waste habits:\n"
+        f"- Implementation intentions, temptation bundling, 2-minute rule, etc.\n"
+        f"- Each with a SPECIFIC example for their situation\n"
     )
     return get_ai_insight(prompt)
 
@@ -115,14 +172,32 @@ def analyze_waste_time(waste_summary: dict, period: str) -> str:
 def analyze_productivity(prod_h: float, essential_h: float,
                          waste_h: float, period: str,
                          streak_days: int = 0) -> str:
+    total = prod_h + essential_h + waste_h
+    prod_pct = (prod_h / total * 100) if total > 0 else 0
+    waste_pct = (waste_h / total * 100) if total > 0 else 0
     prompt = (
-        f"Act as a productivity analyst. For {period}:\n"
-        f"- Productive hours: {prod_h:.1f}h\n"
-        f"- Essential hours: {essential_h:.1f}h\n"
-        f"- Waste hours: {waste_h:.1f}h\n"
+        f"You are an elite productivity coach. Analyze and provide a transformation plan.\n\n"
+        f"DATA ({period}):\n"
+        f"- Productive: {prod_h:.1f}h ({prod_pct:.0f}%)\n"
+        f"- Essential: {essential_h:.1f}h\n"
+        f"- Waste: {waste_h:.1f}h ({waste_pct:.0f}%)\n"
         f"- Study streak: {streak_days} days\n"
-        f"In 3-4 sentences, evaluate the overall productivity balance and give concrete tips "
-        f"to increase productive hours while reducing waste."
+        f"- Total tracked: {total:.1f}h\n\n"
+        f"RESPOND WITH:\n\n"
+        f"## 📊 Productivity Scorecard\n"
+        f"| Metric | Value | Rating | Benchmark |\n"
+        f"|--------|-------|--------|-----------|\n"
+        f"(Productive %, Waste %, Streak, Efficiency — rate each 🟢🟡🔴)\n\n"
+        f"## ⚡ Top 3 Productivity Multipliers\n"
+        f"For each, give: technique name, how to implement, expected impact.\n"
+        f"Use techniques like: deep work blocks, Pomodoro, time-boxing, "
+        f"energy management, 90-min focus cycles, MIT method, Eisenhower matrix.\n\n"
+        f"## 📈 Weekly Optimization Plan\n"
+        f"| Day | Morning Block | Afternoon Block | Evening Block | Target Hours |\n"
+        f"|-----|--------------|-----------------|---------------|-------------|\n"
+        f"(suggest an ideal week structure)\n\n"
+        f"## 🎯 30-Day Challenge\n"
+        f"3 specific measurable goals to hit in the next 30 days.\n"
     )
     return get_ai_insight(prompt)
 
@@ -141,81 +216,92 @@ def analyze_expenses(expense_summary: dict, total: float) -> str:
     return get_ai_insight(prompt)
 
 
-# ── Ask Esu: Comprehensive Personalized Study Assistant ──────────────────
-def ask_esu(user_prompt: str, context: str) -> str:
+# ── SMART QUESTION CLASSIFIER ────────────────────────────────────────────
+# Keywords that indicate the question is UPSC/study/timetable related
+_STUDY_KEYWORDS = {
+    # UPSC specific
+    'upsc', 'ias', 'prelims', 'mains', 'gs1', 'gs2', 'gs3', 'gs4', 'csat',
+    'pyq', 'previous year', 'civil services', 'optional', 'essay',
+    # Subjects
+    'polity', 'geography', 'history', 'economics', 'economy', 'environment',
+    'ecology', 'science', 'current affairs', 'public administration',
+    'indian constitution', 'fundamental rights', 'directive principles',
+    # Study actions
+    'study', 'revise', 'revision', 'timetable', 'time table', 'schedule',
+    'plan', 'routine', 'strategy', 'prepare', 'preparation', 'syllabus',
+    'chapter', 'topic', 'subject', 'ncert', 'mock test', 'test series',
+    'answer writing', 'notes', 'booklist', 'book list', 'resources',
+    # Productivity
+    'productivity', 'waste', 'procrastination', 'focus', 'concentration',
+    'distraction', 'weak subject', 'strong subject', 'improve',
+    'backlog', 'behind', 'catch up', 'hours', 'daily routine',
+    # Exam related
+    'exam', 'cutoff', 'marks', 'score', 'rank', 'topper', 'coaching',
+}
+
+def _is_study_related(prompt: str) -> bool:
+    """Detect if the user's question is about study/UPSC/timetable."""
+    prompt_lower = prompt.lower()
+    match_count = sum(1 for kw in _STUDY_KEYWORDS if kw in prompt_lower)
+    # If 1+ study keywords found, it's study-related
+    return match_count >= 1
+
+
+# ── Ask Esu: Smart Personalized Study Assistant ──────────────────────────
+def ask_esu(user_prompt: str, context: str, pyq_context: str = "") -> str:
     """
-    Esu: A personalized study assistant with expertise in UPSC/competitive exam preparation.
-    Considers PYQ patterns, important subjects, chapters, and personalized study data.
+    Esu: A smart study assistant that detects what the user is asking and
+    responds with the best possible answer — rich tables, actionable advice,
+    and UPSC PYQ data when the question is study-related.
     
     Args:
         user_prompt: User's question or request
-        context: User's study data summary, UPSC insights, and exam information
+        context: User's study data summary
+        pyq_context: UPSC PYQ trend data (only injected when study-related)
     
     Returns:
         Personalized response from Esu
     """
-    system_prompt = (
-        "You are Esu, an elite AI study consultant specialized in UPSC exam preparation (Prelims & Mains). "
-        "You combine PYQ analysis with individual study patterns to create highly personalized strategies.\n\n"
-        
-        "YOUR EXPERTISE:\n"
-        "✓ UPSC PYQ trend analysis (subjects, chapters, topics by frequency)\n"
-        "✓ Prelims vs Mains specific strategies and time allocation\n"
-        "✓ Weak subject remediation based on current study hours\n"
-        "✓ High-frequency PYQ topic prioritization\n"
-        "✓ Chapter revision sequencing (important → less frequent → rest)\n"
-        "✓ Time management and daily/weekly study routines\n"
-        "✓ Mock test strategy and practice methodology\n"
-        "✓ Productivity optimization and eliminating time waste\n"
-        "✓ Smart note-making and retention techniques\n"
-        "✓ Exam-day preparation and stress management\n\n"
-        
-        "ANALYSIS APPROACH:\n"
-        "1. PYQ FREQUENCY: Use the provided importance scores (1-99) to prioritize subjects\n"
-        "2. CURRENT EFFORT: Compare user's current study hours vs PYQ importance\n"
-        "3. WEAK AREAS: Identify where user is under-studying high-importance topics\n"
-        "4. TIMELINE: Calculate daily targets based on days remaining\n"
-        "5. EFFICIENCY: Suggest subject combinations and time blocks\n"
-        "6. STRATEGY: Tailor approach based on Prelims/Mains focus\n\n"
-        
-        "PRELIMS SPECIFIC (GS):\n"
-        "- Focus on breadth over depth initially\n"
-        "- Quick facts and dates requirement\n"
-        "- Current affairs integration crucial\n"
-        "- Quick revision possible (factual recall)\n\n"
-        
-        "MAINS SPECIFIC:\n"
-        "- Depth and holistic understanding required\n"
-        "- Essay/answer writing practice essential\n"
-        "- Case studies and examples integration\n"
-        "- Longer revision cycles needed\n\n"
-        
-        "RESPONSE FORMAT:\n"
-        "- Lead with the most important action\n"
-        "- Provide specific daily/weekly routine when requesting study plan\n"
-        "- Quantify recommendations (hours, chapters, topics)\n"
-        "- Highlight high-frequency PYQ topics to focus on\n"
-        "- Suggest mock test strategy\n"
-        "- Include revision timeline\n"
-        "- Be realistic about timelines\n\n"
-        
-        "KEY INSTRUCTION:\n"
-        "Use the UPSC PYQ data provided (importance scores, frequency ranks, important chapters/topics) "
-        "to justify your recommendations. If user's weak subjects have high importance scores, "
-        "emphasize urgent action needed. Always reference specific PYQ patterns.routine when requesting study plan\n"
-        "- Quantify recommendations (hours, chapters, topics)\n"
-        "- Highlight high-frequency PYQ topics to focus on\n"
-        "- Suggest mock test strategy\n"
-        "- Include revision timeline\n"
-        "- Be realistic about timelines\n\n"
-        
-        "KEY INSTRUCTION:\n"
-        "Use the UPSC PYQ data provided (importance scores, frequency ranks, important chapters/topics) "
-        "to justify your recommendations. If user's weak subjects have high importance scores, "
-        "emphasize urgent action needed. Always reference specific PYQ patterns."
+    is_study = _is_study_related(user_prompt)
+    
+    # ── COMPACT SYSTEM PROMPT (token-efficient to avoid rate limits) ──
+    base_prompt = (
+        "You are Esu — a sharp, warm AI study mentor.\n\n"
+        "RULES:\n"
+        "1. Answer EXACTLY what the user asks. No deviation.\n"
+        "2. Use ## Headers, **bold**, bullet points, numbered lists.\n"
+        "3. Include at least 1 markdown table in every response.\n"
+        "4. Keep paragraphs to 2-3 lines MAX.\n"
+        "5. End with 🎯 Key Takeaway (2-3 actionable lines).\n\n"
     )
     
-    full_prompt = f"{system_prompt}\n\n{context}\n\nUser's Request: {user_prompt}"
+    # ── STUDY-SPECIFIC ENHANCEMENT ──
+    if is_study:
+        base_prompt += (
+            "STUDY MODE ACTIVE:\n"
+            "- For TIMETABLE: Use | Time Slot | Activity | Duration | Notes | format with exact times. Include meals, breaks, walk.\n"
+            "- For SUBJECTS: Create priority table with PYQ frequency.\n"
+            "- For REVISION: Phase-wise plan with daily targets.\n"
+            "- For PRODUCTIVITY: Before/after table with recoverable time.\n"
+            "- UPSC refs: Laxmikanth, Spectrum, Shankar IAS, Ramesh Singh, NCERT 6-12.\n\n"
+        )
+    else:
+        base_prompt += "Answer directly with best knowledge. Use tables where applicable.\n\n"
     
-    # Use lightweight model for Ask Esu (less frequent usage)
-    return get_ai_insight(full_prompt, model_type="light")
+    # ── BUILD FINAL PROMPT (keep it lean) ──
+    full_prompt = base_prompt
+    
+    # Add study data context (compact)
+    full_prompt += f"USER DATA:\n{context}\n\n"
+    
+    # Add PYQ data ONLY for study-related questions — truncate to top subjects
+    if is_study and pyq_context:
+        # Limit PYQ context to ~500 chars to save tokens
+        truncated_pyq = pyq_context[:500]
+        if len(pyq_context) > 500:
+            truncated_pyq += "\n...(more subjects available)"
+        full_prompt += f"PYQ TRENDS:\n{truncated_pyq}\n\n"
+    
+    full_prompt += f"QUESTION: {user_prompt}\n\nAnswer the EXACT question. Use tables. Be specific."
+    
+    return get_ai_insight(full_prompt, model_type="light", max_tokens=3000)

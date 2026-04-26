@@ -100,7 +100,7 @@ def get_latest_love_notifications(recipient):
     from database import conn, c
     try:
         c.execute("""
-            SELECT id, message, timestamp, username 
+            SELECT id, message, timestamp, username, is_hidden 
             FROM system_notifications 
             WHERE is_read = FALSE AND (recipient = %s OR (recipient IS NULL AND %s = 'admin'))
             ORDER BY timestamp DESC
@@ -131,12 +131,24 @@ def delete_notification(notif_id):
         pass
 
 
+def toggle_notification_visibility(notif_id, set_hidden):
+    from database import get_fresh_cursor
+    try:
+        tmp_conn, tmp_c = get_fresh_cursor()
+        tmp_c.execute("UPDATE system_notifications SET is_hidden = %s WHERE id = %s", (set_hidden, notif_id))
+        tmp_conn.commit()
+        tmp_c.close()
+        tmp_conn.close()
+    except:
+        pass
+
+
 
 def get_all_love_notifications(recipient):
     from database import conn, c
     try:
         c.execute("""
-            SELECT id, message, timestamp, username 
+            SELECT id, message, timestamp, username, is_hidden 
             FROM system_notifications 
             WHERE recipient = %s OR (recipient IS NULL AND %s = 'admin')
             ORDER BY timestamp DESC
@@ -148,6 +160,62 @@ def get_all_love_notifications(recipient):
 
 # ------------------ ADMIN NOTIFICATIONS UI ------------------
 
+def _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=False, is_hidden=False):
+    """Render a single notification card with optional delete and hide controls."""
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
+        padding: 20px;
+        border-radius: 20px;
+        margin-bottom: 5px;
+        border-left: 5px solid #ff4b4b;
+        box-shadow: 0 10px 20px rgba(255, 75, 75, 0.05);
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 14px; font-weight: 600; color: #ff4b4b;">{icon} From: {sender}</span>
+            <span style="font-size: 12px; color: #999;">⏰ {ts}</span>
+        </div>
+        <div style="font-size: 18px; color: #333; line-height: 1.5; font-style: italic;">
+            "{msg}"
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_del, col_hide = st.columns(2)
+    with col_del:
+        if can_delete:
+            if st.checkbox(f"🗑️ Delete Message #{n_id}?", key=f"chk_del_{n_id}"):
+                st.warning("Are you sure? This cannot be undone.")
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Yes, Delete", key=f"y_del_{n_id}", type="primary"):
+                    delete_notification(n_id)
+                    st.rerun()
+                if c2.button("❌ No, Keep It", key=f"n_del_{n_id}"):
+                    st.rerun()
+                    
+    with col_hide:
+        if can_hide:
+            if is_hidden:
+                if st.button("👁️ Unhide Message", key=f"unhide_{n_id}"):
+                    toggle_notification_visibility(n_id, False)
+                    st.rerun()
+            else:
+                if st.button("🔒 Hide Message", key=f"hide_{n_id}"):
+                    toggle_notification_visibility(n_id, True)
+                    st.rerun()
+
+    mark_notification_read(n_id)
+
+
+def _get_note_icon(msg):
+    """Return the appropriate icon for a notification message."""
+    if "accepted" in msg.lower() or "Love" in msg:
+        return "💖"
+    elif "clicked 'NO'" in msg or "rejected" in msg.lower():
+        return "💔"
+    return "🔔"
+
+
 def show_admin_notifications(recipient='admin', mode='all'):
 
     # Fetch all notifications
@@ -157,7 +225,7 @@ def show_admin_notifications(recipient='admin', mode='all'):
     filtered_notifs = []
     for n in notifs:
         msg = n[1] # row is (id, message, timestamp, username)
-        is_system = any(prefix in msg for prefix in ["🔔", "💔", "💖 YES!"])
+        is_system = any(prefix in msg for prefix in ["🔔", "💔", "💖 YES!", "📝"])
         
         if mode == 'system' and is_system:
             filtered_notifs.append(n)
@@ -183,65 +251,119 @@ def show_admin_notifications(recipient='admin', mode='all'):
     if mode == 'system':
         can_delete = config.get("can_delete_system_alerts", False) or recipient == 'admin'
     else: # mode == 'personal' or 'all'
-        # Default to checking personal note permission for 'all' mode or specified 'personal' mode
         can_delete = config.get("can_delete_messages", False) or recipient == 'admin'
 
-    for n_id, msg, ts, sender in filtered_notifs:
-        # Determine if it's a love message, rejection, or system
-        if "accepted" in msg.lower() or "Love" in msg:
-            icon = "💖"
-        elif "clicked 'NO'" in msg or "rejected" in msg.lower():
-            icon = "💔"
-        else:
-            icon = "🔔"
+    # ── PERSONAL MODE: Hide/Reveal + Group by Sender ──
+    if mode == 'personal':
+        can_hide = config.get("can_hide_personal_notes", False) or recipient == 'admin'
         
+        visible_notes = [n for n in filtered_notifs if not n[4]]
+        hidden_notes = [n for n in filtered_notifs if n[4]]
+
+        from collections import OrderedDict
+        
+        # ── Display Visible Notes ──
+        if visible_notes:
+            grouped_visible = OrderedDict()
+            for n_id, msg, ts, sender, is_hidden in visible_notes:
+                if sender not in grouped_visible:
+                    grouped_visible[sender] = []
+                grouped_visible[sender].append((n_id, msg, ts, sender, is_hidden))
+
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                padding: 14px 20px; border-radius: 14px; border: 1px solid #334155;
+                margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;
+            ">
+                <span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">
+                    📬 {len(visible_notes)} Note{'s' if len(visible_notes) != 1 else ''} from {len(grouped_visible)} sender{'s' if len(grouped_visible) != 1 else ''}
+                </span>
+                <span style="color: #64748b; font-size: 12px;">Grouped by user</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            for sender_name, notes in grouped_visible.items():
+                unread_count = len(notes)
+                with st.expander(f"💌 {sender_name} — {unread_count} note{'s' if unread_count != 1 else ''}", expanded=False):
+                    for n_id, msg, ts, sender, is_hidden in notes:
+                        icon = _get_note_icon(msg)
+                        _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=False)
+        else:
+            st.info("No visible notes right now.")
+
+        # ── Display Hidden Notes Section ──
+        if can_hide and hidden_notes:
+            st.divider()
+            reveal_key = f"_reveal_hidden_{recipient}"
+            if reveal_key not in st.session_state:
+                st.session_state[reveal_key] = False
+            
+            if not st.session_state[reveal_key]:
+                if st.button("👁️ Reveal Hidden Messages", width="stretch", key="btn_reveal_hidden"):
+                    st.session_state[reveal_key] = True
+                    st.rerun()
+            else:
+                if st.button("🔒 Hide Messages Again", width="stretch", key="btn_hide_again"):
+                    st.session_state[reveal_key] = False
+                    st.rerun()
+                
+                st.markdown("### 🔒 Hidden Messages")
+                grouped_hidden = OrderedDict()
+                for n_id, msg, ts, sender, is_hidden in hidden_notes:
+                    if sender not in grouped_hidden:
+                        grouped_hidden[sender] = []
+                    grouped_hidden[sender].append((n_id, msg, ts, sender, is_hidden))
+
+                for sender_name, notes in grouped_hidden.items():
+                    unread_count = len(notes)
+                    with st.expander(f"🔒 {sender_name} — {unread_count} hidden note{'s' if unread_count != 1 else ''}", expanded=True):
+                        for n_id, msg, ts, sender, is_hidden in notes:
+                            icon = _get_note_icon(msg)
+                            _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=True)
+
+    else:
+        # ── SYSTEM / ALL MODE: Group by sender ──
+        from collections import OrderedDict
+        grouped = OrderedDict()
+        for n_id, msg, ts, sender, is_hidden in filtered_notifs:
+            if sender not in grouped:
+                grouped[sender] = []
+            grouped[sender].append((n_id, msg, ts, sender, is_hidden))
+
         st.markdown(f"""
         <div style="
-            background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
-            padding: 20px;
-            border-radius: 20px;
-            margin-bottom: 5px;
-            border-left: 5px solid #ff4b4b;
-            box-shadow: 0 10px 20px rgba(255, 75, 75, 0.05);
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            padding: 14px 20px; border-radius: 14px; border: 1px solid #334155;
+            margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;
         ">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span style="font-size: 14px; font-weight: 600; color: #ff4b4b;">{icon} From: {sender}</span>
-                <span style="font-size: 12px; color: #999;">⏰ {ts}</span>
-            </div>
-            <div style="font-size: 18px; color: #333; line-height: 1.5; font-style: italic;">
-                "{msg}"
-            </div>
+            <span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">
+                🔔 {len(filtered_notifs)} Alert{'s' if len(filtered_notifs) != 1 else ''} related to {len(grouped)} user{'s' if len(grouped) != 1 else ''}
+            </span>
+            <span style="color: #64748b; font-size: 12px;">Grouped by user</span>
         </div>
         """, unsafe_allow_html=True)
 
-        # Conscious Delete implementation - only show if permitted
-        if can_delete:
-            if st.checkbox(f"🗑️ Delete Message #{n_id}?", key=f"chk_del_{n_id}"):
-                st.warning("Are you sure? This cannot be undone.")
-                c1, c2 = st.columns(2)
-                if c1.button("✅ Yes, Delete", key=f"y_del_{n_id}", type="primary"):
-                    delete_notification(n_id)
-                    st.rerun()
-                if c2.button("❌ No, Keep It", key=f"n_del_{n_id}"):
-                    st.rerun()
-
-        # Mark as read
-        mark_notification_read(n_id)
+        for sender_name, notes in grouped.items():
+            unread_count = len(notes)
+            with st.expander(f"🔔 {sender_name} — {unread_count} alert{'s' if unread_count != 1 else ''}", expanded=False):
+                for n_id, msg, ts, sender, is_hidden in notes:
+                    icon = _get_note_icon(msg)
+                    _render_note_card(n_id, msg, ts, sender, icon, can_delete)
 
     # Clear all button - only show if permitted
     if can_delete:
         st.divider()
-        if st.button(f"🗑️ Clear {mode.capitalize()} History", width='stretch'):
+        if st.button(f"🗑️ Clear {mode.capitalize()} History", width='stretch', key=f"clear_{mode}_{recipient}"):
             from database import get_fresh_cursor
             tmp_conn, tmp_c = get_fresh_cursor()
             if tmp_c:
                 try:
-                    # Use the same classification logic as the display to identify IDs
                     notifs = get_all_love_notifications(recipient)
                     ids_to_delete = []
                     
-                    for n_id, msg, ts, sender in notifs:
-                        is_system = any(prefix in msg for prefix in ["🔔", "💔", "💖 YES!"])
+                    for n_id, msg, ts, sender, is_hidden in notifs:
+                        is_system = any(prefix in msg for prefix in ["🔔", "💔", "💖 YES!", "📝"])
                         if (mode == 'system' and is_system):
                             ids_to_delete.append(n_id)
                         elif (mode == 'personal' and not is_system):
@@ -250,7 +372,6 @@ def show_admin_notifications(recipient='admin', mode='all'):
                             ids_to_delete.append(n_id)
                     
                     if ids_to_delete:
-                        # Use ANY for PostgreSQL to delete a list of IDs efficiently
                         tmp_c.execute("DELETE FROM system_notifications WHERE id = ANY(%s)", (ids_to_delete,))
                         tmp_conn.commit()
                     tmp_c.close()
@@ -264,18 +385,65 @@ def show_admin_notifications(recipient='admin', mode='all'):
                 st.error("Database connection failed")
 
 
+def notify_admins_personal_note(sender, message, target_recipient):
+    """Notify admin and users with can_receive_love_notifications when a personal note is sent.
+    This creates a system-style notification so it appears in the admin's 'Note Activity' tab."""
+    from database import get_fresh_cursor, get_ist_now
+    try:
+        tmp_conn, tmp_c = get_fresh_cursor()
+        # Find all admin-like recipients: admin + users with notification privileges
+        admin_recipients = ['admin']
+        tmp_c.execute("SELECT username FROM user_config WHERE can_receive_love_notifications = TRUE")
+        admin_recipients.extend([r[0] for r in tmp_c.fetchall()])
+        # Remove duplicates, and don't notify the sender or the actual recipient (they see it directly)
+        admin_recipients = set(admin_recipients) - {sender, target_recipient}
+        
+        notify_msg = f"📝 {sender} sent a personal note to {target_recipient}: \"{message[:50]}{'...' if len(message) > 50 else ''}\""
+        
+        for admin_user in admin_recipients:
+            tmp_c.execute(
+                "INSERT INTO system_notifications (username, message, recipient, timestamp) VALUES (%s, %s, %s, %s)",
+                (sender, notify_msg, admin_user, get_ist_now()),
+            )
+        tmp_conn.commit()
+        tmp_c.close()
+        tmp_conn.close()
+    except Exception as e:
+        print(f"Error notifying admins of personal note: {e}")
+
+
 
 # ------------------ MUSIC ------------------
 def play_music(song_path="Perfect.mp3"):
     # MyLove Special page has its own music — the sidebar player is skipped on this page
     try:
         import os
+        # If song_path doesn't have an extension, try to find the actual file
+        if not any(song_path.lower().endswith(ext) for ext in [".mp3", ".m4a", ".webm", ".wav", ".ogg"]):
+            supported = [".mp3", ".m4a", ".webm", ".wav", ".ogg"]
+            for ext in supported:
+                if os.path.exists(song_path + ext):
+                    song_path += ext
+                    break
+        
         if os.path.exists(song_path):
-            st.audio(song_path, format="audio/mp3", autoplay=True, loop=True)
+            ext = os.path.splitext(song_path)[1].lower()
+            mime_type = f"audio/{ext[1:]}" if ext != ".mp3" else "audio/mpeg"
+            st.audio(song_path, format=mime_type, autoplay=True, loop=True)
         else:
             st.sidebar.warning(f"⚠️ {song_path} not found. Please add the file to the project folder.")
-            if song_path != "Perfect.mp3" and os.path.exists("Perfect.mp3"):
-                st.audio("Perfect.mp3", format="audio/mp3", autoplay=True, loop=True)
+            # Fallback to Perfect.mp3 or any other version of it
+            fallback = "Perfect.mp3"
+            if not os.path.exists(fallback):
+                for ext in [".m4a", ".webm", ".wav", ".ogg"]:
+                    if os.path.exists("Perfect" + ext):
+                        fallback = "Perfect" + ext
+                        break
+            
+            if os.path.exists(fallback):
+                ext = os.path.splitext(fallback)[1].lower()
+                mime_type = f"audio/{ext[1:]}" if ext != ".mp3" else "audio/mpeg"
+                st.audio(fallback, format=mime_type, autoplay=True, loop=True)
     except Exception as e:
         st.error(f"Error playing music: {e}")
 

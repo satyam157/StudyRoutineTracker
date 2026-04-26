@@ -404,6 +404,11 @@ if c is not None:
         except:
             pass
 
+        try:
+            c.execute("ALTER TABLE user_config ADD COLUMN can_hide_personal_notes BOOLEAN DEFAULT FALSE")
+        except:
+            pass
+
         c.execute("""
         CREATE TABLE IF NOT EXISTS user_subjects (
             id SERIAL PRIMARY KEY,
@@ -508,7 +513,7 @@ def get_user_config(username):
     """Retrieve love-related permissions for a user."""
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
-        tmp_c.execute("SELECT can_view_mylove_special, can_send_love_messages, can_receive_love_messages, can_receive_love_notifications, can_delete_messages, can_delete_system_alerts, can_access_music, music_pages, mylove_default_song FROM user_config WHERE username=%s", (username,))
+        tmp_c.execute("SELECT can_view_mylove_special, can_send_love_messages, can_receive_love_messages, can_receive_love_notifications, can_delete_messages, can_delete_system_alerts, can_access_music, music_pages, mylove_default_song, can_hide_personal_notes FROM user_config WHERE username=%s", (username,))
         row = tmp_c.fetchone()
         tmp_c.close()
         tmp_conn.close()
@@ -522,22 +527,23 @@ def get_user_config(username):
                 "can_delete_system_alerts": row[5] if len(row) > 5 else False,
                 "can_access_music": row[6] if len(row) > 6 else False,
                 "music_pages": row[7] if len(row) > 7 else "all",
-                "mylove_default_song": row[8] if len(row) > 8 else "Perfect.mp3"
+                "mylove_default_song": row[8] if len(row) > 8 else "Perfect.mp3",
+                "can_hide_personal_notes": row[9] if len(row) > 9 else False
             }
-        return {"can_view_mylove_special": False, "can_send_love_messages": False, "can_receive_love_messages": False, "can_receive_love_notifications": False, "can_delete_messages": False, "can_delete_system_alerts": False, "can_access_music": False, "music_pages": "all", "mylove_default_song": "Perfect.mp3"}
+        return {"can_view_mylove_special": False, "can_send_love_messages": False, "can_receive_love_messages": False, "can_receive_love_notifications": False, "can_delete_messages": False, "can_delete_system_alerts": False, "can_access_music": False, "music_pages": "all", "mylove_default_song": "Perfect.mp3", "can_hide_personal_notes": False}
     except:
-        return {"can_view_mylove_special": False, "can_send_love_messages": False, "can_receive_love_messages": False, "can_receive_love_notifications": False, "can_delete_messages": False, "can_delete_system_alerts": False, "can_access_music": False, "music_pages": "all", "mylove_default_song": "Perfect.mp3"}
+        return {"can_view_mylove_special": False, "can_send_love_messages": False, "can_receive_love_messages": False, "can_receive_love_notifications": False, "can_delete_messages": False, "can_delete_system_alerts": False, "can_access_music": False, "music_pages": "all", "mylove_default_song": "Perfect.mp3", "can_hide_personal_notes": False}
 
 
-def update_user_config(username, can_view, can_send_msg, can_receive_msg, can_receive_notif, delete_msgs, delete_alerts, can_access_music=False, music_pages="all", mylove_default_song="Perfect.mp3"):
+def update_user_config(username, can_view, can_send_msg, can_receive_msg, can_receive_notif, delete_msgs, delete_alerts, can_access_music=False, music_pages="all", mylove_default_song="Perfect.mp3", can_hide_personal_notes=False):
     """Update love-related permissions for a user."""
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         tmp_c.execute("""
             UPDATE user_config 
-            SET can_view_mylove_special=%s, can_send_love_messages=%s, can_receive_love_messages=%s, can_receive_love_notifications=%s, can_delete_messages=%s, can_delete_system_alerts=%s, can_access_music=%s, music_pages=%s, mylove_default_song=%s
+            SET can_view_mylove_special=%s, can_send_love_messages=%s, can_receive_love_messages=%s, can_receive_love_notifications=%s, can_delete_messages=%s, can_delete_system_alerts=%s, can_access_music=%s, music_pages=%s, mylove_default_song=%s, can_hide_personal_notes=%s
             WHERE username=%s
-        """, (can_view, can_send_msg, can_receive_msg, can_receive_notif, delete_msgs, delete_alerts, can_access_music, music_pages, mylove_default_song, username))
+        """, (can_view, can_send_msg, can_receive_msg, can_receive_notif, delete_msgs, delete_alerts, can_access_music, music_pages, mylove_default_song, can_hide_personal_notes, username))
         tmp_conn.commit()
         tmp_c.close()
         tmp_conn.close()

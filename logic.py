@@ -19,6 +19,7 @@ test_types = ["Mock Test","Sectional","PYQ"]
 
 PRODUCTIVE_TYPES = ["Study","Revision","Test", "Book Reading", "Answer Writing", "Practice"]
 ESSENTIAL_TYPES = ["Coaching", "Office", "WFH"]
+NEUTRAL_TYPES = ["Sleep", "Powernap", "Napping"]
 
 
 def calculate_sleep_hours(sleep_time_str, wakeup_time_str):
@@ -27,18 +28,27 @@ def calculate_sleep_hours(sleep_time_str, wakeup_time_str):
     Case 1: Sleep at PM (e.g. 11 PM) -> (24 - sleep_hour) + wakeup_hour
     Case 2: Sleep at AM (e.g. 1 AM) -> wakeup_hour - sleep_hour
     """
+    def _parse(t_str):
+        if not t_str or not str(t_str).strip():
+            return None
+        s = str(t_str).strip().upper()
+        # Handle '0:35 AM' -> '12:35 AM' because %I (12-hr) expects 1-12
+        if s.startswith("0:"):
+            s = "12:" + s[2:]
+        return datetime.strptime(s, "%I:%M %p")
+
     try:
         # Parse Wakeup Time (Morning of the day)
-        if not wakeup_time_str or not str(wakeup_time_str).strip():
+        w_dt = _parse(wakeup_time_str)
+        if not w_dt:
             return 0
-        w_dt = datetime.strptime(str(wakeup_time_str).strip(), "%I:%M %p")
         w_h = w_dt.hour + w_dt.minute / 60.0
         
         # Parse Sleep Time (Night or early morning)
-        if not sleep_time_str or not str(sleep_time_str).strip():
+        s_dt = _parse(sleep_time_str)
+        if not s_dt:
             return w_h  # Fallback: assume slept at midnight
             
-        s_dt = datetime.strptime(str(sleep_time_str).strip(), "%I:%M %p")
         s_h = s_dt.hour + s_dt.minute / 60.0
         
         if "PM" in str(sleep_time_str).upper():
@@ -46,7 +56,11 @@ def calculate_sleep_hours(sleep_time_str, wakeup_time_str):
             duration = (24 - s_h) + w_h
         else:
             # e.g. 1 AM (1.0) to 6 AM (6.0) -> 6 - 1 = 5.0
-            duration = w_h - s_h
+            # or 12:30 AM (0.5) to 6 AM (6.0) -> 6 - 0.5 = 5.5
+            if s_h > w_h: # Slept at say 11 AM and woke at 6 AM? (Unlikely but handle)
+                 duration = (24 - s_h) + w_h
+            else:
+                 duration = w_h - s_h
             
         return max(0, min(duration, 24))
         
@@ -91,6 +105,7 @@ def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
     
     productive = df[df['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
     essential = df[df['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
+    neutral = df[df['type'].isin(NEUTRAL_TYPES)]['duration'].sum()
     
     # Get unique dates in the dataframe
     unique_dates = pd.to_datetime(df['date']).unique()
@@ -102,6 +117,7 @@ def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
     
     total_day_limit = 0
     total_sleep_hours = 0
+    total_powernap_hours = 0
     
     for date in unique_dates:
         if hasattr(date, 'date'): date_str = str(date.date())
@@ -123,7 +139,14 @@ def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
             elif isinstance(sleep_hours, (int, float)):
                 total_sleep_hours += sleep_hours
 
-    # Calculate available hours: (total_day_limit - sleep - essential)
+        # Calculate powernap hours for this date
+        if powernap_hours is not None:
+            if isinstance(powernap_hours, dict):
+                total_powernap_hours += powernap_hours.get(date_str, 0)
+            elif isinstance(powernap_hours, (int, float)):
+                total_powernap_hours += powernap_hours
+
+    # Previous Logic: available_hours = (total_day_limit - sleep - essential)
     available_hours = total_day_limit - total_sleep_hours - essential
     
     if available_hours <= 0:
@@ -186,6 +209,7 @@ def daily_report(df, sleep_data=None, powernap_data=None):
     for d, g in df.groupby('date'):
         productive = g[g['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
         essential = g[g['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
+        neutral = g[g['type'].isin(NEUTRAL_TYPES)]['duration'].sum()
         
         # Get sleep and powernap hours
         date_str = str(d)
@@ -195,16 +219,16 @@ def daily_report(df, sleep_data=None, powernap_data=None):
         # Determine day limit: current hour if today, else 24
         day_limit = current_hour if date_str == today_str else 24.0
         
-        # Calculate available hours: day_limit - sleep - essential
-        available_hours = day_limit - sleep_hours - essential
+        # Previous logic for scores: available = day_limit - sleep - essential
+        available_for_score = day_limit - sleep_hours - essential
         
-        # Waste is everything that is NOT productive, NOT essential, and NOT sleep up to day_limit.
+        # New logic for waste hours: calculated strictly as (day_limit - sleep - essential - productive)
         waste = max(0, day_limit - sleep_hours - essential - productive)
         
-        # Calculate productivity score
-        if available_hours > 0:
-            score = round((productive / available_hours) * 100, 2)
-            waste_score = round((waste / available_hours) * 100, 2)
+        # Calculate productivity score based on PREVIOUS logic
+        if available_for_score > 0:
+            score = round((productive / available_for_score) * 100, 2)
+            waste_score = round((waste / available_for_score) * 100, 2)
         else:
             score = 0
             waste_score = 0
@@ -221,7 +245,7 @@ def daily_report(df, sleep_data=None, powernap_data=None):
             "day_limit": round(day_limit, 2) # helpful for debugging
         })
 
-    return pd.DataFrame(report)
+    return pd.DataFrame(report).sort_values('date', ascending=False)
 
 
 # -------- NEW: FOCUS SCORE --------
@@ -336,24 +360,31 @@ def get_sleep_intervals(sleep_time_str, wakeup_time_str):
     Returns list of (start_float, end_float) intervals for sleep.
     Handles midnight crossing by splitting into two if necessary.
     """
+    def _parse(t_str):
+        if not t_str or not str(t_str).strip():
+            return None
+        s = str(t_str).strip().upper()
+        if s.startswith("0:"):
+            s = "12:" + s[2:]
+        try:
+            return datetime.strptime(s, "%I:%M %p")
+        except:
+            return None
+
     try:
-        if not wakeup_time_str or not str(wakeup_time_str).strip():
+        w_dt = _parse(wakeup_time_str)
+        if not w_dt:
             return []
-        w_dt = datetime.strptime(str(wakeup_time_str).strip(), "%I:%M %p")
         w_h = w_dt.hour + w_dt.minute / 60.0
         
-        if not sleep_time_str or not str(sleep_time_str).strip():
+        s_dt = _parse(sleep_time_str)
+        if not s_dt:
             return [(0, w_h)] # Assume sleep from midnight to wakeup
             
-        s_dt = datetime.strptime(str(sleep_time_str).strip(), "%I:%M %p")
         s_h = s_dt.hour + s_dt.minute / 60.0
         
         if "PM" in str(sleep_time_str).upper():
             # e.g. 11 PM (23.0) to 6 AM (6.0)
-            # This spans across midnight. Since we analyze day-by-day:
-            # On 'today' (the day user woke up), sleep was 00:00 to 06:00
-            # On 'yesterday', sleep started at 23:00 and goes to 24:00
-            # For a single day's 24h analysis, 'Sleep' is usually the morning part.
             return [(0, w_h)]
         else:
             # e.g. 1 AM (1.0) to 6 AM (6.0)
@@ -400,6 +431,7 @@ def distribute_duration_across_hours(df, denom_days=1, sleep_intervals_list=None
             
         is_prod = row['type'] in PRODUCTIVE_TYPES
         is_essential = row['type'] in ESSENTIAL_TYPES
+        is_neutral = row['type'] in NEUTRAL_TYPES
         
         remaining = duration
         current_time = start_f
@@ -414,7 +446,7 @@ def distribute_duration_across_hours(df, denom_days=1, sleep_intervals_list=None
             elif is_essential:
                 essential_hrs[hour_idx] += to_fill
             else:
-                # Logged waste (e.g. Entertainment)
+                # Logged waste and neutral go to waste
                 waste_hrs[hour_idx] += to_fill
             
             total_hrs_logged[hour_idx] += to_fill
@@ -514,16 +546,17 @@ def time_of_day_analysis_24h(df, sleep_intervals=None):
     
     report = []
     for hour in range(24):
-        # For a single day, the denominator for % is slot_caps[hour] (usually 1.0 or fraction if today)
         cap = slot_caps[hour]
         
-        if cap > 0:
-            # Ensure we cap values at the slot limit for % calculation in case of overlaps
-            p_val = min(cap, prod_hrs[hour])
-            w_val = min(cap, waste_hrs[hour])
+        # Calculate available time for this hour (excluding sleep and essential)
+        available_for_hour = max(0.0, cap - sleep_hrs[hour] - essential_hrs[hour])
+        
+        if available_for_hour > 0:
+            p_val_capped = min(available_for_hour, prod_hrs[hour])
+            w_val_capped = min(available_for_hour, waste_hrs[hour])
             
-            p_pct = round((p_val / cap) * 100, 1)
-            w_pct = round((w_val / cap) * 100, 1)
+            p_pct = round((p_val_capped / available_for_hour) * 100, 1)
+            w_pct = round((w_val_capped / available_for_hour) * 100, 1)
         else:
             p_pct = 0.0
             w_pct = 0.0
@@ -567,16 +600,26 @@ def time_of_day_analysis_cumulative_24h(df, filter_month=None, all_sleep_interva
     for hour in range(24):
         cap = slot_caps[hour]
         
-        # average hours per day in this slot
+        # calculate available time across all days for this slot
+        available_for_hour = max(0.0, cap - sleep_hrs[hour] - essential_hrs[hour])
+        
+        if available_for_hour > 0:
+            p_val_capped = min(available_for_hour, prod_hrs[hour])
+            w_val_capped = min(available_for_hour, waste_hrs[hour])
+            
+            p_pct = round((p_val_capped / available_for_hour) * 100, 1)
+            w_pct = round((w_val_capped / available_for_hour) * 100, 1)
+        else:
+            p_pct = 0.0
+            w_pct = 0.0
+            
         if cap > 0:
             p_avg = min(1.0, prod_hrs[hour] / cap)
             w_avg = min(1.0, waste_hrs[hour] / cap)
             e_avg = min(1.0, essential_hrs[hour] / cap)
             s_avg = min(1.0, sleep_hrs[hour] / cap)
-            p_pct = round(p_avg * 100, 1)
-            w_pct = round(w_avg * 100, 1)
         else:
-            p_avg = w_avg = e_avg = s_avg = p_pct = w_pct = 0.0
+            p_avg = w_avg = e_avg = s_avg = 0.0
         
         report.append({
             "hour": f"{hour:02d}:00",
@@ -597,7 +640,7 @@ def time_of_day_analysis_cumulative_24h(df, filter_month=None, all_sleep_interva
 
 def calculate_top_streaks(df: pd.DataFrame, year=None, month=None):
     """
-    Calculate top 5 longest streaks within a given month or year.
+    Calculate top 10 longest streaks within a given month or year.
     A streak is a series of consecutive days with productive hours > 0.
     """
     if df.empty:
@@ -652,13 +695,17 @@ def calculate_top_streaks(df: pd.DataFrame, year=None, month=None):
             'length': current_streak
         })
 
-    # Sort streaks by length descending and take top 5
+    # Sort streaks by length descending and take top 10
     streaks.sort(key=lambda x: x['length'], reverse=True)
-    return streaks[:5]
+    top_streaks = streaks[:10]
+    
+    # Sort the top 10 by end_date descending (latest first)
+    top_streaks.sort(key=lambda x: x['end_date'], reverse=True)
+    return top_streaks
 
 
 def get_top_hours_all_time(df: pd.DataFrame, type='productive'):
-    """Find top 5 hours (0-23) with highest aggregate productive or waste time."""
+    """Find top 10 hours (0-23) with highest aggregate productive or waste time."""
     if df.empty:
         return []
     
@@ -675,12 +722,12 @@ def get_top_hours_all_time(df: pd.DataFrame, type='productive'):
             })
     
     hourly_stats.sort(key=lambda x: x['duration'], reverse=True)
-    return hourly_stats[:5]
+    return hourly_stats[:10]
 
 
 def get_top_study_days(df: pd.DataFrame, year=None, month=None, is_weekend=None):
     """
-    Find top 5 days with most study time.
+    Find top 10 days with most study time.
     Separable by weekend/weekday.
     Returns day, hours, and what was read.
     """
@@ -740,7 +787,8 @@ def get_top_study_days(df: pd.DataFrame, year=None, month=None, is_weekend=None)
 
     report_df = pd.DataFrame(results)
     if not report_df.empty:
-        report_df = report_df.sort_values('hours', ascending=False).head(5)
+        report_df = report_df.sort_values('hours', ascending=False).head(10)
+        report_df = report_df.sort_values('date', ascending=False)
     
     return report_df
 

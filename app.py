@@ -9,6 +9,7 @@ st.set_page_config(layout="wide")
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import datetime
 from datetime import timedelta, date
 import shutil
@@ -134,6 +135,9 @@ st.markdown("""
 # Sidebar Header: User Emoji, Username and Logout button below
 import database
 from database import get_fresh_cursor, reconnect, save_esu_response, get_esu_responses, delete_esu_response, ensure_connection
+import importlib
+import logic
+importlib.reload(logic)
 from logic import *
 
 # Initialize or ensure connection at startup
@@ -275,10 +279,13 @@ from database import supabase_client, STORAGE_BUCKET
 # Helper to get songs from Supabase Storage + Local fallback
 # Helper to get songs from Supabase Storage + Local fallback
 def get_all_songs(force_refresh=False):
-    # Use glob for recursive search to find songs in subfolders too
     import glob
-    # Find all .mp3 files in the current directory and all subdirectories
-    all_files = glob.glob("**/*.mp3", recursive=True)
+    # Find all supported audio files in the current directory and all subdirectories
+    supported_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
+    all_files = []
+    for ext in supported_exts:
+        all_files.extend(glob.glob(f"**/*{ext}", recursive=True))
+    
     # Filter out anything in common hidden/ignored folders
     local_songs = [f for f in all_files if not any(x in f for x in ['.git', '__pycache__', 'venv', 'env'])]
     
@@ -293,7 +300,8 @@ def get_all_songs(force_refresh=False):
         # but we could if the bucket is very large.
         res = supabase_client.storage.from_(STORAGE_BUCKET).list()
         if isinstance(res, list):
-            cloud_songs = [f['name'] for f in res if f['name'].lower().endswith(".mp3")]
+            supported_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
+            cloud_songs = [f['name'] for f in res if f['name'].lower().endswith(supported_exts)]
             # Combine and remove duplicates
             return sorted(list(set(local_songs + cloud_songs)))
         return sorted(list(set(local_songs)))
@@ -324,7 +332,10 @@ all_mp3s = st.session_state.all_mp3s
 def clean_song_name(filename):
     # Get basename if it's a path
     name = os.path.basename(filename)
-    name = name.replace(".mp3", "")
+    # Remove any supported extension
+    for ext in (".mp3", ".m4a", ".webm", ".wav", ".ogg"):
+        name = name.replace(ext, "")
+    name = name.replace(".mp3", "") # Fallback for edge cases
     name = re.sub(r' \d+ [Kk]bps| Youngistaan', '', name)
     name = name.replace("_", " ").replace("-", " ")
     name = " ".join(name.split()).title()
@@ -378,7 +389,7 @@ if "music_play_triggered" not in st.session_state:
 def _render_music_player(is_mylove=False):
     """Render the sidebar music player with warm light-colored scrollable song list."""
     if not song_names_list:
-        st.sidebar.info("🎵 No .mp3 files found in Cloud Storage or Local Directory.")
+        st.sidebar.info("🎵 No audio files found in Cloud Storage or Local Directory.")
         st.sidebar.divider()
         return
 
@@ -394,9 +405,6 @@ def _render_music_player(is_mylove=False):
         </div>
     """, unsafe_allow_html=True)
 
-    if st.sidebar.button("🔄 Refresh Library", key="refresh_music_sidebar", use_container_width=True):
-        st.session_state._refresh_music = True
-        st.rerun()
 
     def next_song():
         if not song_names_list: return
@@ -532,27 +540,39 @@ def _render_music_player(is_mylove=False):
     if st.session_state.music_autoswitch:
         st.html("""
         <script>
-        setInterval(() => {
-            try {
-                const audioTags = window.parent.document.querySelectorAll('audio');
-                if (audioTags.length > 0) {
-                    const sidebarAudio = window.parent.document.querySelector('[data-testid="stSidebar"] audio');
-                    let audio = sidebarAudio || audioTags[audioTags.length - 1];
-                    if (audio && !audio.dataset.autoswitchAttached) {
-                        audio.dataset.autoswitchAttached = "true";
-                        audio.addEventListener('ended', function() {
-                            const buttons = window.parent.document.querySelectorAll('button');
-                            for (let btn of buttons) {
-                                if (btn.innerText.includes('⏭️')) {
-                                    btn.click();
-                                    break;
-                                }
+        (function() {
+            setInterval(() => {
+                try {
+                    function getItems(win) {
+                        let res = { audios: [], buttons: [] };
+                        try {
+                            res.audios = Array.from(win.document.querySelectorAll('audio'));
+                            res.buttons = Array.from(win.document.querySelectorAll('button'));
+                            let fs = win.document.querySelectorAll('iframe');
+                            for (let i=0; i<fs.length; i++) {
+                                try {
+                                    let s = getItems(fs[i].contentWindow);
+                                    res.audios = res.audios.concat(s.audios);
+                                    res.buttons = res.buttons.concat(s.buttons);
+                                } catch(e) {}
                             }
-                        });
+                        } catch(e) {}
+                        return res;
                     }
-                }
-            } catch(e) {}
-        }, 1000);
+                    const all = getItems(window.top);
+                    all.audios.forEach(a => {
+                        const isDone = a.ended || (a.duration > 0 && a.currentTime >= a.duration - 0.5);
+                        if (isDone && !a.dataset.nextTriggered) {
+                            a.dataset.nextTriggered = "true";
+                            let b = all.buttons.find(btn => (btn.title && btn.title.toLowerCase().includes('next')) || 
+                                                            (btn.innerText && btn.innerText.includes('⏭')));
+                            if (b) { b.click(); }
+                        }
+                        if (a.currentTime < 0.2) a.dataset.nextTriggered = "";
+                    });
+                } catch(e) {}
+            }, 500);
+        })();
         </script>
         """, unsafe_allow_javascript=True)
 
@@ -590,15 +610,22 @@ if USER_CONFIG.get("can_receive_love_notifications") or USER == 'admin':
     notifs = proposal.get_latest_love_notifications(USER)
     if notifs:
         st.sidebar.markdown("### 🔔 New Messages")
-        for n_id, msg, ts, sender in notifs:
+        for n_id, msg, ts, sender, is_hidden in notifs:
             if f"toasted_{n_id}" not in st.session_state:
                 st.toast(f"New Message: {msg}", icon="💖")
                 st.session_state[f"toasted_{n_id}"] = True
-            st.sidebar.markdown(f"""
-                <div style="background-color: rgba(255, 75, 75, 0.1); border: 1px solid #ff4b4b; padding: 10px; border-radius: 12px; margin-bottom: 5px;">
-                    <p style="font-size: 0.85rem; margin: 0;"><b>{sender}:</b> {msg[:30]}...</p>
-                </div>
-            """, unsafe_allow_html=True)
+                
+            col_msg, col_x = st.sidebar.columns([6, 1])
+            with col_msg:
+                st.markdown(f"""
+                    <div style="background-color: rgba(255, 75, 75, 0.1); border: 1px solid #ff4b4b; padding: 10px; border-radius: 12px; margin-bottom: 5px;">
+                        <p style="font-size: 0.85rem; margin: 0;"><b>{sender}:</b> {msg[:30]}...</p>
+                    </div>
+                """, unsafe_allow_html=True)
+            with col_x:
+                if st.button("✖", key=f"dismiss_notif_{n_id}"):
+                    proposal.mark_notification_read(n_id)
+                    st.rerun()
 
 if USER == "admin":
     menu_options.append("Manage Users")
@@ -680,14 +707,127 @@ if _show_sidebar_player:
 
 if menu == "Chat":
     st.title("💌 Love Chat & Inbox")
-    tab_notes, tab_send, tab_alerts = st.tabs(["📥 Personal Notes", "🚀 Send a Note", "🔔 System Alerts"])
     
     import proposal
+    
+    # Determine if the user should see the Note Activity tab
+    _show_note_activity = USER == 'admin' or USER_CONFIG.get("can_receive_love_notifications", False)
+    
+    if _show_note_activity:
+        tab_notes, tab_send, tab_alerts, tab_activity = st.tabs([
+            "📥 Personal Notes", "🚀 Send a Note", "🔔 System Alerts", "📝 Note Activity"
+        ])
+    else:
+        tab_notes, tab_send, tab_alerts = st.tabs([
+            "📥 Personal Notes", "🚀 Send a Note", "🔔 System Alerts"
+        ])
+    
     with tab_notes:
         proposal.show_admin_notifications(USER, mode='personal')
         
     with tab_alerts:
         proposal.show_admin_notifications(USER, mode='system')
+    
+    # Note Activity tab — shows all personal note notifications sent to admin/privileged users
+    if _show_note_activity:
+        with tab_activity:
+            st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                padding: 16px 22px; border-radius: 14px; border: 1px solid #334155;
+                margin-bottom: 18px;
+            ">
+                <div style="font-size: 16px; color: #e2e8f0; font-weight: 700; margin-bottom: 4px;">
+                    📝 Note Activity Monitor
+                </div>
+                <div style="font-size: 13px; color: #94a3b8;">
+                    Real-time feed of personal notes sent between users.
+                    You receive these because you have notification privileges.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Fetch notifications that are note-activity style (contain "📝" prefix)
+            all_notifs = proposal.get_all_love_notifications(USER)
+            activity_notifs = [n for n in all_notifs if "📝" in n[1]]
+            
+            if not activity_notifs:
+                st.info("No note activity yet. When users send personal notes to each other, you'll see it here. 🔍")
+            else:
+                from collections import OrderedDict
+                # Group by sender
+                activity_grouped = OrderedDict()
+                for n_id, msg, ts, sender, is_hidden in activity_notifs:
+                    if sender not in activity_grouped:
+                        activity_grouped[sender] = []
+                    activity_grouped[sender].append((n_id, msg, ts, sender, is_hidden))
+                
+                st.markdown(f"""
+                <div style="
+                    display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+                ">
+                    <div style="background: #1e293b; padding: 10px 18px; border-radius: 10px; border: 1px solid #334155;">
+                        <span style="color: #94a3b8; font-size: 12px;">Total Activity</span><br>
+                        <span style="color: #38bdf8; font-size: 20px; font-weight: 700;">{len(activity_notifs)}</span>
+                    </div>
+                    <div style="background: #1e293b; padding: 10px 18px; border-radius: 10px; border: 1px solid #334155;">
+                        <span style="color: #94a3b8; font-size: 12px;">Active Senders</span><br>
+                        <span style="color: #a78bfa; font-size: 20px; font-weight: 700;">{len(activity_grouped)}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                _activity_can_delete = USER == 'admin' or USER_CONFIG.get("can_delete_system_alerts", False)
+                
+                for sender_name, notes in activity_grouped.items():
+                    with st.expander(f"📝 {sender_name} — {len(notes)} event{'s' if len(notes) != 1 else ''}", expanded=False):
+                        for n_id, msg, ts, sender, is_hidden in notes:
+                            st.markdown(f"""
+                            <div style="
+                                background: linear-gradient(135deg, #f0f4ff 0%, #ffffff 100%);
+                                padding: 16px;
+                                border-radius: 16px;
+                                margin-bottom: 5px;
+                                border-left: 4px solid #6366f1;
+                                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
+                            ">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 13px; font-weight: 600; color: #6366f1;">📝 {sender}</span>
+                                    <span style="font-size: 11px; color: #999;">⏰ {ts}</span>
+                                </div>
+                                <div style="font-size: 15px; color: #333; line-height: 1.5;">
+                                    {msg}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            if _activity_can_delete:
+                                if st.checkbox(f"🗑️ Delete #{n_id}?", key=f"act_del_{n_id}"):
+                                    if st.button("✅ Confirm Delete", key=f"act_y_{n_id}", type="primary"):
+                                        proposal.delete_notification(n_id)
+                                        st.rerun()
+                            
+                            proposal.mark_notification_read(n_id)
+                
+                # Clear all activity
+                if _activity_can_delete:
+                    st.divider()
+                    if st.button("🗑️ Clear All Note Activity", width='stretch', key="clear_note_activity"):
+                        from database import get_fresh_cursor
+                        tmp_conn, tmp_c = get_fresh_cursor()
+                        if tmp_c:
+                            try:
+                                ids_to_delete = [n[0] for n in activity_notifs]
+                                if ids_to_delete:
+                                    tmp_c.execute("DELETE FROM system_notifications WHERE id = ANY(%s)", (ids_to_delete,))
+                                    tmp_conn.commit()
+                                tmp_c.close()
+                                tmp_conn.close()
+                                st.success("Activity history cleared! ✨")
+                                import time; time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
         
     with tab_send:
         if USER_CONFIG.get("can_send_love_messages") or USER == 'admin':
@@ -697,6 +837,7 @@ if menu == "Chat":
             if USER == 'admin':
                 if st.button("❤️ Quick 'I Love You' to Her"):
                     proposal.send_love_notification("admin", "I love you too, my princess! 💖🌹", "foryou")
+                    proposal.notify_admins_personal_note("admin", "I love you too, my princess! 💖🌹", "foryou")
                     st.toast("Love message sent! 💌", icon="❤️")
             
             with st.container():
@@ -719,6 +860,8 @@ if menu == "Chat":
                     if st.button("🚀 Send Love"):
                         if love_msg.strip():
                             proposal.send_love_notification(USER, love_msg.strip(), target_usr)
+                            # Notify admin/privileged users about this note activity
+                            proposal.notify_admins_personal_note(USER, love_msg.strip(), target_usr)
                             st.success(f"Your message took flight to {target_usr}! ✨")
                             st.balloons()
                         else:
@@ -735,7 +878,7 @@ if menu == "Love Management" and USER == "admin":
     ALL_PAGES = ["Daily Entry","Calendar","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses","Chat","MyLove Special","Media Player"]
     
     try:
-        users_df = read_sql("SELECT u.username, c.can_view_mylove_special, c.can_send_love_messages, c.can_receive_love_messages, c.can_receive_love_notifications, c.can_delete_messages, c.can_delete_system_alerts, c.can_access_music, c.music_pages, c.mylove_default_song FROM users u LEFT JOIN user_config c ON u.username = c.username WHERE u.username != 'admin'")
+        users_df = read_sql("SELECT u.username, c.can_view_mylove_special, c.can_send_love_messages, c.can_receive_love_messages, c.can_receive_love_notifications, c.can_delete_messages, c.can_delete_system_alerts, c.can_access_music, c.music_pages, c.mylove_default_song, c.can_hide_personal_notes FROM users u LEFT JOIN user_config c ON u.username = c.username WHERE u.username != 'admin'")
         all_potential_recipients = users_df['username'].tolist() + ["admin"]
         
         for index, row in users_df.iterrows():
@@ -748,6 +891,7 @@ if menu == "Love Management" and USER == "admin":
                 v5 = col1.checkbox("Delete Personal Notes", value=row['can_delete_messages'], key=f"d_note_{row['username']}")
                 v6 = col2.checkbox("Delete System Alerts", value=row['can_delete_system_alerts'], key=f"d_sys_{row['username']}")
                 v7 = col1.checkbox("Use Music Player", value=row['can_access_music'], key=f"d_mus_{row['username']}")
+                v10 = col2.checkbox("🔒 Hide Personal Notes", value=row.get('can_hide_personal_notes', False), key=f"hide_notes_{row['username']}")
                 
                 # Per-page music player controls
                 if v7:
@@ -776,7 +920,8 @@ if menu == "Love Management" and USER == "admin":
                 # --- MyLove Special default song selector ---
                 if v1:  # Only show if MyLove Special page is enabled
                     _current_default = row.get('mylove_default_song', 'Perfect.mp3') or 'Perfect.mp3'
-                    _mp3_files = [f for f in os.listdir(".") if f.lower().endswith(".mp3")]
+                    _audio_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
+                    _mp3_files = [f for f in os.listdir(".") if f.lower().endswith(_audio_exts)]
                     _mp3_files.sort()
                     _default_idx = _mp3_files.index(_current_default) if _current_default in _mp3_files else 0
                     v9 = st.selectbox(
@@ -791,7 +936,7 @@ if menu == "Love Management" and USER == "admin":
                     v9 = row.get('mylove_default_song', 'Perfect.mp3') or 'Perfect.mp3'
 
                 if st.button("Save Changes", key=f"save_{row['username']}"):
-                    success = update_user_config(row['username'], v1, v2, v3, v4, v5, v6, v7, v8, v9)
+                    success = update_user_config(row['username'], v1, v2, v3, v4, v5, v6, v7, v8, v9, v10)
                     success_recip = set_allowed_recipients(row['username'], selected_recipients)
                     if success and success_recip:
                         st.success(f"Permissions updated for {row['username']}!")
@@ -805,6 +950,47 @@ if menu == "Love Management" and USER == "admin":
 # ---------------- MEDIA PLAYER ----------------
 if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "admin"):
     st.markdown('<div id="media-player-marker"></div>', unsafe_allow_html=True)
+    
+    # Global Frame Explorer for Media Player
+    if st.session_state.music_autoswitch:
+        st.html("""
+        <script>
+        (function() {
+            setInterval(() => {
+                try {
+                    function getItems(win) {
+                        let res = { audios: [], buttons: [] };
+                        try {
+                            res.audios = Array.from(win.document.querySelectorAll('audio'));
+                            res.buttons = Array.from(win.document.querySelectorAll('button'));
+                            let fs = win.document.querySelectorAll('iframe');
+                            for (let i=0; i<fs.length; i++) {
+                                try {
+                                    let s = getItems(fs[i].contentWindow);
+                                    res.audios = res.audios.concat(s.audios);
+                                    res.buttons = res.buttons.concat(s.buttons);
+                                } catch(e) {}
+                            }
+                        } catch(e) {}
+                        return res;
+                    }
+                    const all = getItems(window.top);
+                    all.audios.forEach(a => {
+                        const isDone = a.ended || (a.duration > 0 && a.currentTime >= a.duration - 0.5);
+                        if (isDone && !a.dataset.nextTriggered) {
+                            a.dataset.nextTriggered = "true";
+                            let b = all.buttons.find(btn => (btn.title && btn.title.toLowerCase().includes('next')) || 
+                                                            (btn.innerText && btn.innerText.includes('⏭')));
+                            if (b) { b.click(); }
+                        }
+                        if (a.currentTime < 0.2) a.dataset.nextTriggered = "";
+                    });
+                } catch(e) {}
+            }, 500);
+        })();
+        </script>
+        """, unsafe_allow_javascript=True)
+
     st.title("🎵 Media Player")
     st.markdown("Your music hub — play, download, upload & manage your song library.")
 
@@ -886,11 +1072,18 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             _mode_txt = "🔀 Shuffle" if st.session_state.music_shuffle else "🔁 In Order"
             st.markdown(f"""
                 <div style="display: flex; align-items: center; justify-content: center; gap: 10px; 
-                            background: #111827; padding: 8px; border-radius: 8px; border: 1px solid #374151;">
+                            background: #111827; padding: 8px; border-radius: 8px; border: 1px solid #374151;
+                            margin-bottom: 10px;">
                     <span style="color: #9ca3af; font-size: 0.8rem;">Playback:</span>
                     <span style="color: #38bdf8; font-size: 0.9rem; font-weight: 600;">{_mode_txt}</span>
                 </div>
             """, unsafe_allow_html=True)
+            
+            st.session_state.music_autoswitch = st.checkbox(
+                "⏩ Auto-switch at end",
+                value=st.session_state.music_autoswitch,
+                key="music_auto_chk"
+            )
 
         # --- JS: actually stop or play audio on Media Player page ---
         if st.session_state.get("music_stop_triggered"):
@@ -931,34 +1124,9 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
             </script>
             """, unsafe_allow_javascript=True)
 
-        # Autoswitch JS for the Media Player page
-        if st.session_state.music_autoswitch:
-            st.html("""
-            <script>
-            setInterval(() => {
-                try {
-                    const audioTags = window.parent.document.querySelectorAll('audio');
-                    if (audioTags.length > 0) {
-                        let audio = audioTags[0];
-                        if (audio && !audio.dataset.autoswitchAttached) {
-                            audio.dataset.autoswitchAttached = "true";
-                            audio.addEventListener('ended', function() {
-                                const buttons = window.parent.document.querySelectorAll('button');
-                                for (let btn of buttons) {
-                                    if (btn.innerText.includes('⏭️')) {
-                                        btn.click();
-                                        break;
-                                    }
-                                }
-                            });
-                        }
-                    }
-                } catch(e) {}
-            }, 1000);
-            </script>
-            """, unsafe_allow_javascript=True)
+        # Autoswitch JS was moved to top of block for persistence
     else:
-        st.info("🎵 No .mp3 files found. Try downloading or uploading one above!")
+        st.info("🎵 No audio files found. Try downloading or uploading one above!")
 
     st.divider()
 
@@ -1176,9 +1344,9 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                             try: os.remove(cookie_file_path)
                             except: pass
                         
-                        # Sometimes yt-dlp leaves behind .webm or .m4a if ffmpeg conversion fails partially
+                        # Only cleanup temp files, not supported audio
                         for f in os.listdir("."):
-                            if f.endswith(".webm") or f.endswith(".m4a") or f.endswith(".part") or f.endswith(".ytdl"):
+                            if f.endswith(".part") or f.endswith(".ytdl"):
                                 try: os.remove(f)
                                 except: pass
                         
@@ -1187,8 +1355,9 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                             downloaded_file = None
                             # Find all matching mp3s and pick the most recent one
                             matches = []
+                            _audio_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
                             for f in os.listdir("."):
-                                if f.lower().endswith(".mp3"):
+                                if f.lower().endswith(_audio_exts):
                                     if not custom_name.strip() or custom_name.strip() in f:
                                         matches.append(f)
                             
@@ -1235,11 +1404,13 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                 st.warning("Please enter a YouTube URL.")
     
     with tab_upload:
-        st.markdown("### 📤 Upload an MP3 file directly")
-        uploaded_file = st.file_uploader("Choose an MP3 file", type=["mp3"])
+        st.markdown("### 📤 Upload an audio file directly")
+        uploaded_file = st.file_uploader("Choose an audio file", type=["mp3", "m4a", "webm", "wav", "ogg"])
         if uploaded_file is not None:
             save_name = st.text_input("Save as (filename)", value=uploaded_file.name, key="upload_save_name")
-            if not save_name.endswith(".mp3"):
+            # Auto-append .mp3 only if no supported extension is present
+            _audio_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
+            if not any(save_name.lower().endswith(ext) for ext in _audio_exts):
                 save_name += ".mp3"
             if st.button("💾 Save Song", key="save_upload_btn"):
                 if supabase_client:
@@ -1268,7 +1439,7 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
         # Add refresh button in management tab too
         _refresh_col, _debug_col = st.columns([1, 1])
         with _refresh_col:
-            if st.button("🔄 Rescan Library", key="rescan_btn", use_container_width=True):
+            if st.button("🔄 Rescan Library", key="rescan_btn", width='stretch'):
                 st.session_state._refresh_music = True
                 st.rerun()
         
@@ -1341,499 +1512,323 @@ if menu == "Daily Entry":
 
     date = st.date_input("Date")
 
-    base_activities = [
-        "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-        "Entertainment", "Social Media", "Food", "Transport",
-        "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
-        "Turf", "Travelling", "Powernap"
-    ]
+    tab_act, tab_sleep = st.tabs(["📝 Log Activities", "🌙 Sleep & Wake Log"])
 
-    # Activities that share user-managed subjects
-    _SUBJ_ACTS = ["Study", "Revision", "Answer Writing", "Practice"]
+    with tab_act:
+        base_activities = [
+            "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
+            "Entertainment", "Social Media", "Food", "Transport",
+            "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
+            "Turf", "Travelling", "Powernap"
+        ]
 
-    try:
-        custom_df = read_sql("SELECT name, activity_type, tracking_type FROM custom_boxes WHERE username=%s", (USER,))
-        custom = custom_df['name'].tolist()
-        custom_type_map = dict(zip(custom_df['name'], custom_df['activity_type']))
-        custom_track_map = dict(zip(custom_df['name'], custom_df['tracking_type']))
-    except:
-        custom = []
-        custom_type_map = {}
-        custom_track_map = {}
+        # Activities that share user-managed subjects
+        _SUBJ_ACTS = ["Study", "Revision", "Answer Writing", "Practice"]
 
-    # Activity selection with inline delete for custom activities and base activities
-    _act_col, _del_col = st.columns([3, 1])
-    with _act_col:
-        activity = st.selectbox("Activity", base_activities + custom + ["+ Add New"])
-    
-    # Show delete button for custom and base activities (lets user delete instance from dropdown)
-    with _del_col:
-        if activity in custom:
-            if st.button("🗑️", key=f"del_act_{activity}", help="Delete Activity"):
-                st.session_state[f"confirm_del_act_{activity}"] = True
-            if st.session_state.get(f"confirm_del_act_{activity}", False):
-                st.markdown(f"⚠️ Delete **{activity}**?", unsafe_allow_html=True)
-                _yc, _nc = st.columns([1, 1])
-                with _yc:
-                    if st.button("✅ Yes", key=f"yes_del_act_{activity}"):
-                        c.execute("DELETE FROM custom_boxes WHERE name=%s AND username=%s", (activity, USER))
-                        conn.commit()
-                        st.toast(f"🗑️ Activity '{activity}' deleted.", icon="🗑️")
-                        st.session_state[f"confirm_del_act_{activity}"] = False
-                        st.rerun()
-                with _nc:
-                    if st.button("❌ No", key=f"no_del_act_{activity}"):
-                        st.session_state[f"confirm_del_act_{activity}"] = False
-                        st.rerun()
-        elif activity != "+ Add New":
-            # Show info that this is a base activity that cannot be deleted
-            st.caption("Base activity", help="Base activities cannot be deleted")
+        try:
+            custom_df = read_sql("SELECT name, activity_type, tracking_type FROM custom_boxes WHERE username=%s", (USER,))
+            custom = custom_df['name'].tolist()
+            custom_type_map = dict(zip(custom_df['name'], custom_df['activity_type']))
+            custom_track_map = dict(zip(custom_df['name'], custom_df['tracking_type']))
+        except:
+            custom = []
+            custom_type_map = {}
+            custom_track_map = {}
 
-    if activity == "+ Add New":
-        new_act_col1, new_act_col2, new_act_col3 = st.columns([2, 1, 1])
-        with new_act_col1:
-            new = st.text_input("New Activity Name")
-        with new_act_col2:
-            new_act_type = st.selectbox("Activity Type", ["Productive", "Essential", "Waste"], index=2,
-                                        help="Productive = Study/Work | Essential = Must-do | Waste = Time sink")
-        with new_act_col3:
-            _new_track_mode = st.selectbox(
-                "Tracking Mode",
-                ["Hours only", "Expense + Hours"],
-                help="Hours only: tracks time duration only. Expense + Hours: tracks both expense amount (₹) AND time duration."
-            )
-        # Map friendly label → DB value
-        new_track_type = "Expense (₹)" if _new_track_mode == "Expense + Hours" else "Hours"
-        if _new_track_mode == "Expense + Hours":
-            st.info("ℹ️ This activity will require both an **Expense amount (₹)** AND a **Time Duration** entry each time it is logged.")
-        if st.button("Save Activity"):
-            if new.strip():
-                c.execute("INSERT INTO custom_boxes(name, username, activity_type, tracking_type) VALUES(%s, %s, %s, %s)", (new.strip(), USER, new_act_type, new_track_type))
-                conn.commit()
-                st.toast(f"✅ Activity '{new.strip()}' added as **{new_act_type}** tracked in **{_new_track_mode}**!", icon="✅")
-                import time; time.sleep(1)
-                st.rerun()
-            else:
-                st.warning("Please enter an activity name.")
-
-    sub1 = sub2 = ""
-    _study_track = "Hours"  # Initialize default for Study activity
-
-    # ── Subject-managed activities (Study, Revision, Answer Writing, Practice) ──
-    if activity in _SUBJ_ACTS:
-        _user_subjs = get_user_subjects(USER)
+        # Activity selection with inline delete
+        _act_col, _del_col = st.columns([3, 1])
+        with _act_col:
+            activity = st.selectbox("Activity", base_activities + custom + ["+ Add New"])
         
-        # Subject selection with inline add/delete in same row (compact layout)
-        _subj_col, _subj_del_col = st.columns([3, 1])
-        with _subj_col:
-            sub1 = st.selectbox("Subject", _user_subjs + ["+ Add New"], key="de_subject_sel")
-        
-        # Handle subject delete action (keep in same row with bin emoji)
-        with _subj_del_col:
-            if sub1 in _user_subjs:
-                if st.button("🗑️", key=f"del_subj_{sub1}", help="Delete Subject"):
-                    st.session_state[f"confirm_del_subj_{sub1}"] = True
-            
-            if sub1 in _user_subjs and st.session_state.get(f"confirm_del_subj_{sub1}", False):
-                st.markdown(f"⚠️ Delete **{sub1}**?", unsafe_allow_html=True)
-                _yc, _nc = st.columns([1, 1])
-                with _yc:
-                    if st.button("✅ Yes", key=f"yes_del_subj_{sub1}", width='stretch'):
-                        c.execute(
-                            "DELETE FROM user_subjects WHERE username=%s AND subject=%s",
-                            (USER, sub1)
-                        )
-                        conn.commit()
-                        st.session_state[f"confirm_del_subj_{sub1}"] = False
-                        st.toast(f"🗑️ Subject '{sub1}' deleted.", icon="🗑️")
-                        st.rerun()
-                with _nc:
-                    if st.button("❌ No", key=f"no_del_subj_{sub1}", width='stretch'):
-                        st.session_state[f"confirm_del_subj_{sub1}"] = False
-                        st.rerun()
-        
-        # Handle adding new subject
-        if sub1 == "+ Add New":
-            _new_subj_col, _ = st.columns([3, 1])
-            with _new_subj_col:
-                _new_subj = st.text_input("Subject Name", key="de_new_subj", placeholder="e.g. Science & Tech")
-                if st.button("➕ Add Subject", key="de_add_subj_btn"):
-                    _ns = _new_subj.strip()
-                    if _ns:
-                        try:
-                            c.execute(
-                                "INSERT INTO user_subjects (username, subject) VALUES (%s, %s) "
-                                "ON CONFLICT (username, subject) DO NOTHING",
-                                (USER, _ns)
-                            )
+        with _del_col:
+            if activity in custom:
+                if st.button("🗑️", key=f"del_act_{activity}", help="Delete Activity"):
+                    st.session_state[f"confirm_del_act_{activity}"] = True
+                if st.session_state.get(f"confirm_del_act_{activity}", False):
+                    st.markdown(f"⚠️ Delete **{activity}**?", unsafe_allow_html=True)
+                    _yc, _nc = st.columns([1, 1])
+                    with _yc:
+                        if st.button("✅ Yes", key=f"yes_del_act_{activity}"):
+                            c.execute("DELETE FROM custom_boxes WHERE name=%s AND username=%s", (activity, USER))
                             conn.commit()
-                            st.toast(f"✅ Subject '{_ns}' added to your list!", icon="✅")
+                            st.toast(f"🗑️ Activity '{activity}' deleted.", icon="🗑️")
+                            st.session_state[f"confirm_del_act_{activity}"] = False
+                            st.rerun()
+                    with _nc:
+                        if st.button("❌ No", key=f"no_del_act_{activity}"):
+                            st.session_state[f"confirm_del_act_{activity}"] = False
+                            st.rerun()
+            elif activity != "+ Add New":
+                st.caption("Base activity", help="Base activities cannot be deleted")
+
+        if activity == "+ Add New":
+            new_act_col1, new_act_col2, new_act_col3 = st.columns([2, 1, 1])
+            with new_act_col1:
+                new = st.text_input("New Activity Name")
+            with new_act_col2:
+                new_act_type = st.selectbox("Activity Type", ["Productive", "Essential", "Waste"], index=2)
+            with new_act_col3:
+                _new_track_mode = st.selectbox("Tracking Mode", ["Hours only", "Expense + Hours"])
+            
+            new_track_type = "Expense (₹)" if _new_track_mode == "Expense + Hours" else "Hours"
+            if st.button("Save Activity"):
+                if new.strip():
+                    c.execute("INSERT INTO custom_boxes(name, username, activity_type, tracking_type) VALUES(%s, %s, %s, %s)", (new.strip(), USER, new_act_type, new_track_type))
+                    conn.commit()
+                    st.toast(f"✅ Activity '{new.strip()}' added!", icon="✅")
+                    import time; time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("Please enter an activity name.")
+
+        sub1 = sub2 = ""
+        if activity in _SUBJ_ACTS:
+            _user_subjs = get_user_subjects(USER)
+            _subj_col, _subj_del_col = st.columns([3, 1])
+            with _subj_col:
+                sub1 = st.selectbox("Subject", _user_subjs + ["+ Add New"], key="de_subject_sel")
+            with _subj_del_col:
+                if sub1 in _user_subjs:
+                    if st.button("🗑️", key=f"del_subj_{sub1}"):
+                        st.session_state[f"confirm_del_subj_{sub1}"] = True
+                if sub1 in _user_subjs and st.session_state.get(f"confirm_del_subj_{sub1}", False):
+                    st.markdown(f"⚠️ Delete **{sub1}**?")
+                    _yc, _nc = st.columns([1, 1])
+                    with _yc:
+                        if st.button("✅ Yes", key=f"yes_del_subj_{sub1}"):
+                            c.execute("DELETE FROM user_subjects WHERE username=%s AND subject=%s", (USER, sub1))
+                            conn.commit()
+                            st.session_state[f"confirm_del_subj_{sub1}"] = False
+                            st.toast(f"🗑️ Subject '{sub1}' deleted.", icon="🗑️")
+                            st.rerun()
+                    with _nc:
+                        if st.button("❌ No", key=f"no_del_subj_{sub1}"):
+                            st.session_state[f"confirm_del_subj_{sub1}"] = False
+                            st.rerun()
+            
+            if sub1 == "+ Add New":
+                _new_subj_col, _ = st.columns([3, 1])
+                with _new_subj_col:
+                    _new_subj = st.text_input("Subject Name", key="de_new_subj")
+                    if st.button("➕ Add Subject", key="de_add_subj_btn"):
+                        _ns = _new_subj.strip()
+                        if _ns:
+                            c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, _ns))
+                            conn.commit()
+                            st.toast(f"✅ Subject '{_ns}' added!", icon="✅")
                             import time; time.sleep(1)
                             st.rerun()
-                        except Exception as _e:
-                            st.error(f"Error: {_e}")
-                    else:
-                        st.warning("Enter a subject name.")
 
-    # ── Activity-specific sub-fields ──
-    if activity == "Study":
-        sub2 = st.text_input("Chapter / Topic", max_chars=50, placeholder="Enter chapter/topic...")
+        # Activity specific fields
+        if activity == "Study":
+            sub2 = st.text_input("Chapter / Topic", max_chars=50, placeholder="Enter chapter/topic...")
+        elif activity == "Revision":
+            sub2 = st.text_input("Chapter/Pages Revised", key="de_rev_ch")
+        elif activity == "Book Reading":
+            sub1 = st.text_input("Book Title", key="de_book_title")
+            sub2 = st.text_input("Chapters/Pages", key="de_book_detail")
+        elif activity in ["Answer Writing", "Practice"]:
+            _q_solved = st.number_input("Questions Solved", min_value=0, step=1, key=f"de_q_{activity}")
+            sub2 = f"Q:{int(_q_solved)}" if _q_solved > 0 else ""
+        elif activity == "Test":
+            sub1 = st.selectbox("Test Type", test_types)
+            sub2 = st.text_input("#Questions")
+        elif activity == "Office":
+            sub1 = st.text_input("Work Notes", key="de_office_notes")
+        elif activity == "Coaching":
+            sub1 = st.text_input("Subject", key="de_coaching_topic")
+            sub2 = st.text_input("Notes", key="de_coaching_notes")
+        elif activity == "WFH":
+            sub1 = st.text_input("Work Notes", key="de_wfh_notes")
+        elif activity == "Entertainment":
+            sub1 = st.selectbox("Type", ent_types)
+            if sub1 == "Movie": sub2 = st.selectbox("Mode", movie_modes)
+        elif activity == "Social Media":
+            sub1 = st.selectbox("Platform", social_platform)
+            sub2 = st.selectbox("Content", content_type)
+        elif activity == "Food":
+            sub1 = st.selectbox("Source", food_sources)
+        elif activity == "Transport":
+            sub1 = st.selectbox("Service", transport_services)
+        elif activity == "WentOutside":
+            sub1 = st.text_input("Location", key="de_went_outside")
+        elif activity == "Turf":
+            sub1 = st.text_input("Sport", key="de_turf_sport")
+            sub2 = st.text_input("Details", key="de_turf_detail")
+        elif activity == "Travelling":
+            sub1 = st.selectbox("Mode", ["✈️ Flight", "🚂 Railway", "🚗 Other"], key="de_travel_mode")
+            sub2 = st.text_input("Destination", key="de_travel_dest")
 
-    elif activity == "Revision":
-        sub2 = st.text_input("Chapter/Pages Revised", key="de_rev_ch", placeholder="e.g., Chapter 5 or Pages 23-45")
-
-    elif activity == "Book Reading":
-        sub1 = st.text_input("Book Title / Name", key="de_book_title")
-        sub2 = st.text_input("Chapters/Pages Read", key="de_book_detail", placeholder="e.g., 3 chapters or pages 50-80")
-
-    elif activity in ["Answer Writing", "Practice"]:
-        _q_solved = st.number_input("No. of Questions Solved", min_value=0, step=1, key=f"de_q_{activity}")
-        sub2 = f"Q:{int(_q_solved)}" if _q_solved > 0 else ""
-
-    elif activity == "Test":
-        sub1 = st.selectbox("Test Type", test_types)
-        sub2 = st.text_input("#Questions")
-
-    elif activity == "Office":
-        sub1 = st.text_input("Work Done / Notes", key="de_office_notes", placeholder="e.g., Project meeting, Code review")
-
-    elif activity == "Coaching":
-        sub1 = st.text_input("Subject / Topic", key="de_coaching_topic", placeholder="e.g., Mathematics, Physics lecture")
-        sub2 = st.text_input("Notes", key="de_coaching_notes", placeholder="e.g., Chapter covered, homework")
-
-    elif activity == "WFH":
-        sub1 = st.text_input("Work Done / Notes", key="de_wfh_notes", placeholder="e.g., Client calls, Report writing")
-
-    elif activity == "Entertainment":
-        sub1 = st.selectbox("Type", ent_types)
-        if sub1 == "Movie":
-            sub2 = st.selectbox("Mode", movie_modes)
-
-    elif activity == "Social Media":
-        sub1 = st.selectbox("Platform", social_platform)
-        sub2 = st.selectbox("Content", content_type)
-
-    elif activity == "Food":
-        sub1 = st.selectbox("Source", food_sources)
-
-    elif activity == "Transport":
-        sub1 = st.selectbox("Service", transport_services)
-
-    elif activity == "WentOutside":
-        sub1 = st.text_input("Location / Place", key="de_went_outside", placeholder="e.g., Park, Mall, Beach")
-
-    elif activity == "Turf":
-        sub1 = st.text_input("Sport / Activity", key="de_turf_sport", placeholder="e.g., Cricket, Football, Badminton")
-        sub2 = st.text_input("Details", key="de_turf_detail", placeholder="e.g., Indoor/Outdoor, with friends")
-
-    elif activity == "Travelling":
-        sub1 = st.selectbox("Mode", ["✈️ Flight", "🚂 Railway", "🚗 Other"], key="de_travel_mode")
-        sub2 = st.text_input("Destination / Details", key="de_travel_dest", placeholder="e.g., Delhi to Mumbai")
-
-    # Auto-determine tracking type based on activity type
-    # Activities that track both hours and expense
-    _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling",
-                               "Office", "WFH", "Coaching", "Test"]
-    _track_by_expense = activity in ["Food", "Transport"]
-    
-    if activity in custom:
-        _custom_track = custom_track_map.get(activity, "Hours")
-        if _custom_track == "Expense (₹)":
-            # Expense + Hours mode: show both amount AND time duration
-            _track_both = True
+        _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test"]
+        _track_by_expense = activity in ["Food", "Transport"]
+        if activity in custom:
+            _track_both = (custom_track_map.get(activity) == "Expense (₹)")
             _track_by_expense = False
-        else:
-            _track_both = False
-            _track_by_expense = False
-    
-    # Duration input mode selection (Hours vs Time Range)
-    _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=1, horizontal=True, key=f"de_dur_mode_{activity}")
-    
-    duration = 0.0
-    amount = 0.0
-    start_time = ""  # Capture start time for time-of-day analysis
-    is_midnight_crossing = False  # Track if activity spans midnight
-    duration_today = 0.0
-    duration_tomorrow = 0.0
-    from_h = from_m = to_h = to_m = 0  # Track parsed times for midnight crossing
-    
-    def parse_time_value(raw):
-        """Parse time input (e.g., '2:30 PM' or '14') into hours value"""
-        raw = str(raw).strip()
-        if not raw:
-            return None
-        try:
-            if ":" in raw:
-                h, m = raw.split(":", 1)
-                h, m = int(h), int(m)
-            else:
-                h, m = int(raw), 0
-            return h, m
-        except:
-            return None
-    
-    # Calculate duration based on selected mode
-    if _duration_mode == "Hours":
-        if _track_both:
-            # For activities that track both hours and expense
-            _trade_col1, _trade_col2 = st.columns(2)
-            with _trade_col1:
-                _dur_input = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=None, key=f"de_hours_{activity}")
-                duration = _dur_input if _dur_input is not None else 0.0
-            with _trade_col2:
-                _amt_input = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=None, key=f"de_amount_{activity}")
-                amount = _amt_input if _amt_input is not None else 0.0
-        elif _track_by_expense:
-            _amt_input = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=None)
-            amount   = _amt_input if _amt_input is not None else 0.0
-            duration = 0.0
-        else:
-            _dur_input = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=None)
-            duration = _dur_input if _dur_input is not None else 0.0
-            amount   = 0.0
-    else:
-        # Time Range Mode
-        _time_col1, _time_col2 = st.columns(2)
+
+        _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=1, horizontal=True, key=f"de_dur_mode_{activity}")
         
-        with _time_col1:
-            from_time_raw = st.text_input("From Time (e.g., 2:30 or 14)", key=f"de_from_time_{activity}", placeholder="2:30 PM")
-        with _time_col2:
-            to_time_raw = st.text_input("To Time (e.g., 4:45 or 16)", key=f"de_to_time_{activity}", placeholder="4:45 PM")
-        
-        # Parse and calculate duration
-        if from_time_raw and to_time_raw:
-            from_parsed = parse_time_value(from_time_raw)
-            to_parsed = parse_time_value(to_time_raw)
-            
-            if from_parsed and to_parsed:
-                from_h, from_m = from_parsed
-                to_h, to_m = to_parsed
-                
-                # Store start time for analysis
-                start_time = f"{from_h}:{from_m:02d}"
-                
-                # Convert to minutes for calculation
-                from_mins = from_h * 60 + from_m
-                to_mins = to_h * 60 + to_m
-                
-                # Check if activity crosses midnight
-                if to_mins < from_mins:
-                    is_midnight_crossing = True
-                    # Duration today: from from_time to 23:59:59 (1440 minutes = midnight)
-                    duration_today = (24 * 60 - from_mins) / 60
-                    # Duration tomorrow: from 00:00 to to_time
-                    duration_tomorrow = to_mins / 60
-                    duration = duration_today + duration_tomorrow
-                else:
-                    # Normal case: same day
-                    duration = (to_mins - from_mins) / 60
-                
-                st.caption(f"Duration: **{duration:.1f} hours**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
-            else:
-                st.error("Invalid time format. Use format like '2:30' or '14'")
-                duration = 0.0
-        
-        if _track_both:
-            _amt_tr = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=None, key=f"de_amount_tr_{activity}")
-            amount = _amt_tr if _amt_tr is not None else 0.0
+        duration = 0.0
+        amount = 0.0
+        start_time = ""
+        is_midnight_crossing = False
+        duration_today = duration_tomorrow = 0.0
+        from_h = from_m = to_h = to_m = 0
 
-    if st.button("💾 Save Activity", key="save_main_activity"):
-        if duration > 0 or amount > 0 or _track_by_expense is False:
-            time_note = f" [{start_time}]" if start_time else ""
-            
-            if is_midnight_crossing:
-                # Split activity across midnight
-                # Save today's portion (from from_time to 23:59:59)
-                st_today = f"{from_h}:{from_m:02d}"
-                c.execute("""
-                INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (str(date), activity, sub1, sub2, duration_today, amount, USER, st_today))
-                
-                # Save tomorrow's portion (from 00:00 to to_time)
-                tomorrow_date = date + timedelta(days=1)
-                st_tomorrow = f"{to_h}:{to_m:02d}"
-                c.execute("""
-                INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (str(tomorrow_date), activity, sub1, sub2, duration_tomorrow, 0, USER, st_tomorrow))
-                
-                conn.commit()
-                st.toast(f"✅ Activity split across midnight!\n📅 {date.strftime('%b %d')}: {duration_today:.1f}h\n📅 {tomorrow_date.strftime('%b %d')}: {duration_tomorrow:.1f}h", icon="✅")
-            else:
-                # Normal case: save as single record
-                c.execute("""
-                INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (str(date), activity, sub1, sub2, duration, amount, USER, start_time))
-                conn.commit()
-                st.toast(f"✅ Activity '{activity}' saved successfully!", icon="✅")
-            
-            # Synchronize Powernap with health_logs for reporting
-            if activity.strip().lower() == "powernap":
-                try:
-                    if is_midnight_crossing:
-                        # Update today's portion
-                        c.execute("""
-                            INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s)
-                            ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap
-                        """, (USER, str(date), duration_today))
-                        # Update tomorrow's portion
-                        c.execute("""
-                            INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s)
-                            ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap
-                        """, (USER, str(tomorrow_date), duration_tomorrow))
-                    else:
-                        c.execute("""
-                            INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s)
-                            ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap
-                        """, (USER, str(date), duration))
-                    conn.commit()
-                except Exception as e:
-                    st.error(f"Error syncing powernap to health logs: {e}")
-            
-            import time; time.sleep(1)
-            st.rerun()
-        else:
-            st.warning("Please enter duration or amount.")
-
-    st.divider()
-
-    # ═══════════════════════════════════════════════════════════
-    # SECTION: Today's Activity Log (with delete)
-    # ═══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 1.5px solid #4f46e5;
-        border-radius: 14px;
-        padding: 18px 20px 10px 20px;
-        margin-bottom: 18px;
-    ">
-    <div style="font-size:17px; font-weight:700; color:#a78bfa; margin-bottom:10px;">
-        📋 Activities Logged on Selected Date
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    _today_df = read_sql(
-        "SELECT id, type, subject, chapter, duration, amount, start_time FROM activities WHERE date=%s AND username=%s ORDER BY id",
-        (str(date), USER)
-    )
-
-    if _today_df.empty:
-        st.caption("No activities logged for this date yet.")
-    else:
-        for _, _row in _today_df.iterrows():
-            _rid = int(_row['id'])
-            _parts = [_row['type']]
-            if _row['subject']: _parts.append(str(_row['subject']))
-            
-            # Clean display
-            ch_clean = get_clean_chapter(_row['chapter'])
-            st_val = _row.get('start_time')
-            if not st_val: # Fallback for old entries
-                hr = extract_time_of_day(_row['chapter'])
-                if hr is not None: st_val = f"{hr}:00"
-            
-            if ch_clean: _parts.append(ch_clean)
-            if st_val: _parts.append(f"[{st_val}]")
-            
-            _val = f"{_row['duration']}h" if _row['duration'] > 0 else (f"₹{_row['amount']}" if _row['amount'] > 0 else "")
-            if _val: _parts.append(_val)
-            _lc, _rc = st.columns([5, 1])
-            with _lc:
-                st.markdown(f"&nbsp;&nbsp;• **{'  |  '.join(_parts)}**", unsafe_allow_html=True)
-            with _rc:
-                if st.button("🗑️", key=f"del_daily_{_rid}", help="Delete this entry"):
-                    st.session_state[f"confirm_daily_{_rid}"] = True
-            if st.session_state.get(f"confirm_daily_{_rid}", False):
-                st.warning(f"Delete **{_row['type']}** entry? This cannot be undone.")
-                _yc, _nc = st.columns(2)
-                with _yc:
-                    if st.button("✅ Yes, Delete", key=f"yes_daily_{_rid}"):
-                        # Synchronize Powernap deletion with health_logs
-                        if _row['type'].strip().lower() == "powernap":
-                            c.execute("UPDATE health_logs SET powernap = GREATEST(0, powernap - %s) WHERE username=%s AND date=%s", (_row['duration'], USER, str(date)))
-                        
-                        c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (_rid, USER))
-                        conn.commit()
-                        st.session_state[f"confirm_daily_{_rid}"] = False
-                        st.toast("🗑️ Entry deleted.", icon="🗑️")
-                        st.rerun()
-                with _nc:
-                    if st.button("❌ No, Keep", key=f"no_daily_{_rid}"):
-                        st.session_state[f"confirm_daily_{_rid}"] = False
-                        st.rerun()
-
-    st.divider()
-
-    # ═══════════════════════════════════════════════════════════
-    # SECTION: Sleep & Wake Log
-    # ═══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%);
-        border: 1.5px solid #2563eb;
-        border-radius: 14px;
-        padding: 18px 20px 10px 20px;
-        margin-bottom: 18px;
-    ">
-    <div style="font-size:17px; font-weight:700; color:#60a5fa; margin-bottom:10px;">
-        🌙 Sleep &amp; Wake Log
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    with st.container():
-        sw_col1, sw_col2 = st.columns([1, 1])
-
-        def parse_time(raw, always_am=False):
-            """Parse '6', '6:30', '11' etc. into 'HH:MM AM/PM'."""
-            raw = str(raw).strip()
-            if not raw:
-                return None, None
+        def parse_time_value(raw):
             try:
-                if ":" in raw:
-                    h, m = raw.split(":", 1)
-                    h, m = int(h), int(m)
-                else:
-                    h, m = int(raw), 0
-                period = "AM" if always_am else ("PM" if 7 <= h <= 11 else "AM")
-                return f"{h}:{m:02d} {period}", None
-            except Exception:
-                return None, "Invalid format — use a number like 6 or 6:30"
+                if ":" in str(raw):
+                    h, m = str(raw).split(":", 1)
+                    return int(h), int(m)
+                return int(raw), 0
+            except: return None
 
-        with sw_col1:
-            wu_raw = st.text_input("⏰ Wakeup", key="wu_raw", placeholder="6:00")
-            wu_fmt, wu_err = parse_time(wu_raw, always_am=True)
-            if wu_raw:
-                if wu_err: st.error(wu_err)
-                else:       st.caption(f"→ **{wu_fmt}** AM")
-
-        with sw_col2:
-            sl_raw = st.text_input("😴 Sleep", key="sl_raw", placeholder="11:00")
-            sl_fmt, sl_err = parse_time(sl_raw, always_am=False)
-            if sl_raw:
-                if sl_err: st.error(sl_err)
-                else:       st.caption(f"→ **{sl_fmt}**")
-        
-
-
-        if st.button("💾 Save Sleep & Wake Log", key="save_health"):
-            if wu_fmt or sl_fmt:
-                c.execute("""
-                    INSERT INTO health_logs (username, date, wakeup_time, sleep_time)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (username, date) DO UPDATE SET 
-                        wakeup_time=EXCLUDED.wakeup_time, 
-                        sleep_time=EXCLUDED.sleep_time
-                """, (USER, str(date), wu_fmt or "", sl_fmt or ""))
-                conn.commit()
-                st.toast(f"✅ Log saved for {date}!", icon="✅")
-                st.rerun()
+        if _duration_mode == "Hours":
+            if _track_both:
+                c1, c2 = st.columns(2)
+                with c1: duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=0.0, key=f"de_hours_{activity}")
+                with c2: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0, key=f"de_amount_{activity}")
+            elif _track_by_expense:
+                amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0)
             else:
-                st.warning("Enter at least one value.")
+                duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=0.0)
+        else:
+            c1, c2 = st.columns(2)
+            with c1: from_time_raw = st.text_input("From Time", key=f"de_from_{activity}", placeholder="2:30 PM")
+            with c2: to_time_raw = st.text_input("To Time", key=f"de_to_{activity}", placeholder="4:45 PM")
+            if from_time_raw and to_time_raw:
+                f_p, t_p = parse_time_value(from_time_raw), parse_time_value(to_time_raw)
+                if f_p and t_p:
+                    from_h, from_m = f_p
+                    to_h, to_m = t_p
+                    start_time = f"{from_h}:{from_m:02d}"
+                    f_mins, t_mins = from_h * 60 + from_m, to_h * 60 + to_m
+                    if t_mins < f_mins:
+                        is_midnight_crossing = True
+                        duration_today = (1440 - f_mins) / 60
+                        duration_tomorrow = t_mins / 60
+                        duration = duration_today + duration_tomorrow
+                    else: duration = (t_mins - f_mins) / 60
+                    st.caption(f"Duration: **{duration:.1f} hours**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
+            if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0, key=f"de_amt_tr_{activity}")
+
+        if st.button("💾 Save Activity", key="save_main_activity"):
+            if duration > 0 or amount > 0:
+                if is_midnight_crossing:
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration_today, amount, USER, f"{from_h}:{from_m:02d}"))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}"))
+                else:
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration, amount, USER, start_time))
+                conn.commit()
+                if activity.strip().lower() == "powernap":
+                    try:
+                        if is_midnight_crossing:
+                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration_today))
+                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date + timedelta(days=1)), duration_tomorrow))
+                        else:
+                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration))
+                        conn.commit()
+                    except: pass
+                st.toast(f"✅ Activity saved!", icon="✅")
+                import time; time.sleep(1); st.rerun()
+            else: st.warning("Enter duration/amount.")
+
+        st.divider()
+        st.markdown("### 📋 Activities Logged")
+        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time FROM activities WHERE date=%s AND username=%s ORDER BY id", (str(date), USER))
+        if _today_df.empty: st.caption("No activities logged for this date.")
+        else:
+            for _, _row in _today_df.iterrows():
+                rid = int(_row['id'])
+                parts = [_row['type']]
+                if _row['subject']: parts.append(str(_row['subject']))
+                ch = get_clean_chapter(_row['chapter'])
+                st_v = _row.get('start_time') or ""
+                if ch: parts.append(ch)
+                if st_v: parts.append(f"[{st_v}]")
+                val = f"{_row['duration']}h" if _row['duration'] > 0 else (f"₹{_row['amount']}" if _row['amount'] > 0 else "")
+                if val: parts.append(val)
+                l, r = st.columns([5, 1])
+                l.markdown(f"• **{' | '.join(parts)}**")
+                if r.button("🗑️", key=f"del_daily_{rid}"):
+                    st.session_state[f"confirm_daily_del_{rid}"] = True
+                
+                if st.session_state.get(f"confirm_daily_del_{rid}", False):
+                    st.warning("Delete this entry?", icon="⚠️")
+                    yc, nc = st.columns([1, 1])
+                    with yc:
+                        if st.button("✅ Yes", key=f"yes_daily_del_{rid}", width='stretch'):
+                            c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (rid, USER))
+                            conn.commit()
+                            st.session_state[f"confirm_daily_del_{rid}"] = False
+                            st.rerun()
+                    with nc:
+                        if st.button("❌ No", key=f"no_daily_del_{rid}", width='stretch'):
+                            st.session_state[f"confirm_daily_del_{rid}"] = False
+                            st.rerun()
+
+    with tab_sleep:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #2563eb; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
+            <div style="font-size:17px; font-weight:700; color:#60a5fa; margin-bottom:10px;">🌙 Sleep & Wake Log</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display current values
+        hl_res = read_sql("SELECT wakeup_time, sleep_time FROM health_logs WHERE username=%s AND date=%s", (USER, str(date)))
+        curr_wu = hl_res.iloc[0]['wakeup_time'] if not hl_res.empty else ""
+        curr_sl = hl_res.iloc[0]['sleep_time'] if not hl_res.empty else ""
+        if curr_wu or curr_sl:
+            st.info(f"Current Log: ☀️ Wake: **{curr_wu or 'N/A'}** | 🌙 Sleep: **{curr_sl or 'N/A'}**")
+
+        def parse_time_sw(raw, always_am=False):
+            raw = str(raw).strip()
+            if not raw: return None, None
+            try:
+                if ":" in raw: h, m = map(int, raw.split(":", 1))
+                else: h, m = int(raw), 0
+                period = "AM" if always_am else ("PM" if 7 <= h <= 11 else "AM")
+                if h == 0: h = 12
+                return f"{h}:{m:02d} {period}", None
+            except: return None, "Invalid format"
+
+        c1, c2 = st.columns(2)
+        with c1:
+            wu_raw = st.text_input("⏰ Wakeup", key="wu_raw", placeholder="6:00")
+            wu_f, wu_e = parse_time_sw(wu_raw, True)
+            if wu_raw: 
+                if wu_e: st.error(wu_e)
+                else: st.caption(f"→ **{wu_f}** AM")
+            if st.button("💾 Save Wakeup", key="save_wu"):
+                if wu_f:
+                    c.execute("""
+                        INSERT INTO health_logs (username, date, wakeup_time)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (username, date) DO UPDATE SET 
+                            wakeup_time = EXCLUDED.wakeup_time
+                    """, (USER, str(date), wu_f))
+                    conn.commit()
+                    st.toast(f"✅ Wakeup saved!", icon="✅")
+                    import time; time.sleep(1); st.rerun()
+                else: st.warning("Enter wakeup time.")
+
+        with c2:
+            sl_raw = st.text_input("😴 Sleep", key="sl_raw", placeholder="11:00")
+            sl_f, sl_e = parse_time_sw(sl_raw, False)
+            if sl_raw:
+                if sl_e: st.error(sl_e)
+                else: st.caption(f"→ **{sl_f}**")
+            if st.button("💾 Save Sleep", key="save_sl"):
+                if sl_f:
+                    c.execute("""
+                        INSERT INTO health_logs (username, date, sleep_time)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (username, date) DO UPDATE SET 
+                            sleep_time = EXCLUDED.sleep_time
+                    """, (USER, str(date), sl_f))
+                    conn.commit()
+                    st.toast(f"✅ Sleep saved!", icon="✅")
+                    import time; time.sleep(1); st.rerun()
+                else: st.warning("Enter sleep time.")
 
 # ---------------- CALENDAR ----------------
 elif menu == "Calendar":
@@ -2409,6 +2404,31 @@ elif menu == "Set Target":
             st.metric("⏳ In Progress", in_progress)
         with sum_col4:
             st.metric("📈 Avg Completion", f"{avg_completion:.0f}%")
+
+        # ── NEW: CIRCULAR PROGRESS FOR ACTIVE TARGETS ────────────────────────
+        st.markdown("#### 🔄 Active Targets Completion %")
+        active_df = display_df[display_df['Achieved %'].str.rstrip('%').astype(float) < 100]
+        if not active_df.empty:
+            gauge_cols = st.columns(min(len(active_df), 4))
+            for i, (_, row) in enumerate(active_df.head(4).iterrows()):
+                with gauge_cols[i % 4]:
+                    p_val = float(row['Achieved %'].rstrip('%'))
+                    fig_g = go.Figure(go.Indicator(
+                        mode = "gauge+number",
+                        value = p_val,
+                        title = {'text': row['Subject'], 'font': {'size': 14}},
+                        number = {'suffix': "%", 'font': {'size': 16}},
+                        gauge = {
+                            'axis': {'range': [0, 100], 'tickwidth': 1},
+                            'bar': {'color': "#3b82f6"},
+                            'bgcolor': "#1e1b4b",
+                            'steps': [{'range': [0, 100], 'color': '#1e1b4b'}]
+                        }
+                    ))
+                    fig_g.update_layout(height=140, margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+                    st.plotly_chart(fig_g, width='stretch', key=f"active_gauge_{i}")
+        else:
+            st.success("All targets completed! 🎉")
         
         # Target category breakdown
         st.markdown("### 📑 Target Category Analysis")
@@ -2639,7 +2659,7 @@ elif menu == "Study Target Manager":
                 detail = (
                     named.groupby(['clean_ch', '_date'], as_index=False)['duration'].sum()
                     .rename(columns={'clean_ch': 'Chapter / Topic', '_date': 'Date', 'duration': 'Hours'})
-                    .sort_values(['Chapter / Topic', 'Date'])
+                    .sort_values(['Chapter / Topic', 'Date'], ascending=[True, False])
                 )
                 return summary, detail
             elif goal_unit == _HOURS_TYPE:
@@ -2649,6 +2669,7 @@ elif menu == "Study Target Manager":
                     .sort_values('Date')
                 )
                 daily['Cumulative Hours'] = daily['Hours'].cumsum().round(2)
+                daily = daily.sort_values('Date', ascending=False)
                 return daily, None
             elif goal_unit in _CUMUL_TYPES:
                 col = 'Pages' if goal_unit == 'Pages' else 'Questions'
@@ -2658,11 +2679,13 @@ elif menu == "Study Target Manager":
                     return None, None
                 daily = pd.DataFrame(rows).groupby('Date')[col].sum().reset_index().sort_values('Date')
                 daily[f'Cumulative {col}'] = daily[col].cumsum()
+                daily = daily.sort_values('Date', ascending=False)
                 return daily, None
             else:
                 tbl = (
                     sub_acts.groupby(['chapter', '_date'], as_index=False)['duration'].sum()
                     .rename(columns={'chapter': 'Chapter / Item', '_date': 'Date', 'duration': 'Hours'})
+                    .sort_values('Date', ascending=False)
                 )
                 return tbl, None
 
@@ -2705,10 +2728,35 @@ elif menu == "Study Target Manager":
                 header += "  🎉"
 
             with st.expander(header, expanded=expanded):
-                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-                mc1.metric("Goal",     f"{total} {goal_unit}")
-                mc2.metric("Done",     f"{label} {goal_unit}")
-                mc3.metric("Progress", f"{percent}%")
+                mc1, mc2, mc3, mc4, mc5 = st.columns([1.5, 1, 1, 1, 1.5])
+                
+                with mc1:
+                    # Circular Completion Indicator
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode = "gauge+number",
+                        value = percent,
+                        domain = {'x': [0, 1], 'y': [0, 1]},
+                        number = {'suffix': "%", 'font': {'size': 20, 'color': 'white'}},
+                        gauge = {
+                            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "white"},
+                            'bar': {'color': "#22c55e" if percent >= 100 else "#3b82f6"},
+                            'bgcolor': "#1e1b4b",
+                            'borderwidth': 2,
+                            'bordercolor': "gray",
+                            'steps': [
+                                {'range': [0, 100], 'color': '#1e1b4b'}
+                            ],
+                        }
+                    ))
+                    fig_gauge.update_layout(
+                        height=150, margin=dict(l=10, r=10, t=30, b=10),
+                        paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}
+                    )
+                    st.plotly_chart(fig_gauge, width='stretch', key=f"gauge_{tid}")
+
+                mc2.metric("Goal",     f"{total} {goal_unit}")
+                mc3.metric("Done",     f"{label} {goal_unit}")
+                # mc4 was previously mc3 (Progress)
                 mc4.metric("Total Time", f"{hours_taken}h")
                 if achieved_on:
                     mc5.metric("Completed On", str(achieved_on))
@@ -2769,15 +2817,15 @@ elif menu == "Study Target Manager":
                 _render_card(t, achieved_on=achieved_on, expanded=False)
 
         # ── WEAK SUBJECTS (bottom) ────────────────────────────────────────────
-        st.subheader("📉 Weak Subjects (Least Studied)")
-        study_acts = act_df[act_df['type'] == 'Study']
+        st.subheader("📉 Weak Subjects (Least Studied & Revised)")
+        study_acts = act_df[act_df['type'].isin(['Study', 'Revision'])]
         if study_acts.empty:
             st.info("No study entries yet.")
         else:
             subj_hours = study_acts.groupby('subject')['duration'].sum().sort_values()
             
             # Summary Metrics
-            st.markdown("### 📊 Study Hours by Subject")
+            st.markdown("### 📊 Study & Revision Hours by Subject")
             st.dataframe(subj_hours.reset_index().rename(columns={'subject':'Subject','duration':'Hours'}),
                          width='stretch')
             st.bar_chart(subj_hours)
@@ -2792,7 +2840,7 @@ elif menu == "Study Target Manager":
             with analysis_cols[0]:
                 st.metric("📚 Total Subjects", num_subjects)
             with analysis_cols[1]:
-                st.metric("⏱️ Total Study Hours", f"{total_study_hours:.1f}h")
+                st.metric("⏱️ Total Productive Hours", f"{total_study_hours:.1f}h")
             with analysis_cols[2]:
                 avg_hours = total_study_hours / num_subjects if num_subjects > 0 else 0
                 st.metric("📊 Average per Subject", f"{avg_hours:.1f}h")
@@ -2874,6 +2922,12 @@ elif menu == "Productivity Analysis":
 
     ALL_PRODUCTIVE = [a for a in (PRODUCTIVE_TYPES + custom_productive) if a != "UPSC App"]
     ALL_ESSENTIAL  = [a for a in (ESSENTIAL_TYPES + custom_essential) if a != "UPSC App"]
+    
+    # Define NEUTRAL_TYPES locally if not imported to avoid NameError
+    try:
+        ALL_NEUTRAL = NEUTRAL_TYPES
+    except NameError:
+        ALL_NEUTRAL = ["Sleep", "Powernap", "Napping"]
 
     tab_daily, tab_monthly, tab_yearly = st.tabs([
         "📅 Daily Productivity Analysis",
@@ -2887,7 +2941,14 @@ elif menu == "Productivity Analysis":
     with tab_daily:
         st.subheader("📅 Daily Productivity Analysis")
 
-        if df.empty:
+        # Keep only last 60 days for daily view
+        if not df.empty:
+            cutoff_date = (date.today() - timedelta(days=60)).strftime('%Y-%m-%d')
+            df_daily = df[df['date'] >= cutoff_date].copy()
+        else:
+            df_daily = df.copy()
+
+        if df_daily.empty:
             st.info("No activity data found.")
         else:
             # Load sleep data for daily report
@@ -2915,15 +2976,15 @@ elif menu == "Productivity Analysis":
                 sleep_hours_dict = {}
                 powernap_dict = {}
             
-            prod_df     = df[df['type'].isin(ALL_PRODUCTIVE)]
-            essential_df= df[df['type'].isin(ALL_ESSENTIAL)]
-            waste_df    = df[~df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL)]
+            prod_df     = df_daily[df_daily['type'].isin(ALL_PRODUCTIVE)]
+            essential_df= df_daily[df_daily['type'].isin(ALL_ESSENTIAL)]
+            waste_df    = df_daily[~df_daily['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
 
             # Metrics row
             m1, m2, m3 = st.columns(3)
-            m1.metric("Productivity %", f"{productivity_score(df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)}%")
-            m2.metric("Study Streak",   f"{streak(df)} days")
-            m3.metric("Focus Score",    f"{focus_score(df)}%")
+            m1.metric("Productivity %", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)}%")
+            m2.metric("Study Streak",   f"{streak(df_daily)} days")
+            m3.metric("Focus Score",    f"{focus_score(df_daily)}%")
 
             st.divider()
 
@@ -2931,7 +2992,7 @@ elif menu == "Productivity Analysis":
             st.markdown("### 📈 Productivity Analysis")
 
             # TABLE FIRST
-            report_df = daily_report(df, sleep_data=sleep_hours_dict, powernap_data=powernap_dict)
+            report_df = daily_report(df_daily, sleep_data=sleep_hours_dict, powernap_data=powernap_dict)
             if not report_df.empty:
                 st.markdown("**📋 Daily Performance Report Table**")
                 # Updated table prioritizing scores
@@ -3002,8 +3063,8 @@ elif menu == "Productivity Analysis":
                 st.metric("⚠️ Waste Hours", f"{waste_total:.1f}h",
                          delta=f"{(waste_total/(prod_total+essential_total+waste_total)*100) if (prod_total+essential_total+waste_total)>0 else 0:.0f}%")
             with sum_col4:
-                st.metric("🎯 Overall Score", f"{productivity_score(df, sleep_hours=sleep_hours_dict):.0f}%",
-                         delta=f"Streak: {streak(df)}d")
+                st.metric("🎯 Overall Score", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict):.0f}%",
+                         delta=f"Streak: {streak(df_daily)}d")
             
             # Time Allocation Analysis
             st.markdown("### 🔄 Time Allocation Breakdown")
@@ -3040,7 +3101,7 @@ elif menu == "Productivity Analysis":
                 with insights_cols[0]:
                     if prod_percent >= 50:
                         st.success(f"✅ **Excellent Productivity** ({prod_percent:.0f}%)")
-                        st.markdown(f"You're maintaining a high study ratio! Your top subjects are: **{', '.join(df[df['type'].isin(ALL_PRODUCTIVE)].groupby('subject')['duration'].sum().nlargest(2).index.tolist())}**.")
+                        st.markdown(f"You're maintaining a high study ratio! Your top subjects are: **{', '.join(df_daily[df_daily['type'].isin(ALL_PRODUCTIVE)].groupby('subject')['duration'].sum().nlargest(2).index.tolist())}**.")
                         st.caption("🚀 *Tip: Try the **1-3-7 Revision Method** (revise after 1, 3, and 7 days) to lock in these gains.*")
                     elif prod_percent >= 35:
                         st.info(f"ℹ️ **Good Productivity** ({prod_percent:.0f}%)")
@@ -3071,7 +3132,7 @@ elif menu == "Productivity Analysis":
                         st.caption("🛠️ *Method: **Time Boxing**—Assign a specific hour only for {culprits[0] if culprits else 'social media'} to contain it.*")
                 
                 with insights_cols[2]:
-                    f_score = focus_score(df)
+                    f_score = focus_score(df_daily)
                     if f_score >= 75:
                         st.success(f"🎯 **Excellent Focus** ({f_score:.0f}%)")
                         st.markdown("Most of your study sessions are **Deep Work** (>= 2 hours long). Great concentration!")
@@ -3140,16 +3201,16 @@ elif menu == "Productivity Analysis":
                         essential_total, 
                         waste_total, 
                         period_str, 
-                        streak(df)
+                        streak(df_daily)
                     )
-                    st.markdown("#### 🤖 Esu's Recommendation")
-                    st.info(insight)
-                    st.success("✅ Analysis complete. Use these tips to optimize your study routine!")
+                    st.markdown("---")
+                    st.markdown(insight)
+                    st.success("✅ Analysis complete!")
             else:
                 st.markdown(f"""
                 **📊 Quick Stats:**
                 - **Productive**: {prod_total:.1f}h | **Essential**: {essential_total:.1f}h | **Waste**: {waste_total:.1f}h
-                - **Study Streak**: {streak(df)} days
+                - **Study Streak**: {streak(df_daily)} days
                 
                 *Click the button above to get personalized AI recommendations based on your data.*
                 """)
@@ -3178,7 +3239,7 @@ elif menu == "Productivity Analysis":
                     _filtered_waste_df = waste_df.copy()
 
                 # TABLE
-                waste_tbl = _filtered_waste_df.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date')
+                waste_tbl = _filtered_waste_df.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date', ascending=False)
                 st.markdown("**📋 Waste Entries Table**")
                 st.dataframe(waste_tbl.rename(columns={'date':'Date','type':'Activity','duration':'Hours'}),
                              width='stretch')
@@ -3233,6 +3294,81 @@ elif menu == "Productivity Analysis":
 
             st.divider()
 
+            # ── ESSENTIAL ANALYSIS ────────────────────────────────────────────
+            st.markdown("### 🔵 Essential Work Analysis")
+
+            if essential_df.empty:
+                st.info("No essential time logged! ℹ️")
+            else:
+                # ── Activity Filter Dropdown (empty = show all) ──
+                _all_essential_types = sorted(essential_df['type'].unique().tolist())
+                _selected_essential_types = st.multiselect(
+                    "🎯 Filter by Essential Activity (leave empty to show all)",
+                    options=_all_essential_types,
+                    default=[],
+                    key="essential_activity_filter"
+                )
+
+                # Apply filter: if nothing selected → show all; otherwise → filter
+                if _selected_essential_types:
+                    _filtered_essential_df = essential_df[essential_df['type'].isin(_selected_essential_types)].copy()
+                else:
+                    _filtered_essential_df = essential_df.copy()
+
+                # TABLE
+                essential_tbl = _filtered_essential_df.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date', ascending=False)
+                st.markdown("**📋 Essential Entries Table**")
+                st.dataframe(essential_tbl.rename(columns={'date':'Date','type':'Activity','duration':'Hours'}),
+                             width='stretch')
+
+                # Show "Essential by Activity Type" bar only when no specific filter is applied
+                if not _selected_essential_types:
+                    e_grp = _filtered_essential_df.groupby('type')['duration'].sum().reset_index().sort_values('duration', ascending=False)
+                    fig_eb = px.bar(e_grp, x='type', y='duration',
+                                    labels={'type':'Activity','duration':'Hours'},
+                                    color_discrete_sequence=['#3b82f6'], title="Essential by Activity Type")
+                    st.plotly_chart(fig_eb, width='stretch', key="daily_essential_bar")
+
+                essential_trend = _filtered_essential_df.groupby('date')['duration'].sum().reset_index()
+                fig_el = go.Figure()
+                fig_el.add_trace(go.Scatter(x=essential_trend['date'], y=essential_trend['duration'],
+                    mode='lines+markers', name='Essential', line=dict(color='#3b82f6', width=3),
+                    fill='tozeroy', fillcolor='rgba(59,130,246,0.1)'))
+                fig_el.update_layout(title="Daily Essential Trend", xaxis_title="Date", yaxis_title="Hours")
+                st.plotly_chart(fig_el, width='stretch', key="daily_essential_line")
+
+                # ── Hourly Distribution ──
+                st.markdown("#### ⏰ Hourly Distribution")
+                _edf_h = _filtered_essential_df.copy()
+                _edf_h['_hour'] = _edf_h.apply(extract_hour_from_row, axis=1)
+                _edf_h_valid = _edf_h.dropna(subset=['_hour'])
+                if not _edf_h_valid.empty:
+                    _eh_grp = _edf_h_valid.groupby('_hour')['duration'].sum().reset_index()
+                    _eh_all = pd.DataFrame({'_hour': range(24)})
+                    _eh_all['_hour_label'] = _eh_all['_hour'].apply(lambda h: f"{h:02d}:00")
+                    _eh_full = _eh_all.merge(_eh_grp[['_hour', 'duration']], on='_hour', how='left').fillna(0)
+                    _fig_eh = go.Figure()
+                    _fig_eh.add_trace(go.Scatter(
+                        x=_eh_full['_hour_label'], y=_eh_full['duration'],
+                        mode='lines+markers', name='Essential',
+                        line=dict(color='#3b82f6', width=3),
+                        fill='tozeroy', fillcolor='rgba(59,130,246,0.15)',
+                        marker=dict(size=6, color='#60a5fa')
+                    ))
+                    _fig_eh.update_layout(
+                        title="Hourly Essential Distribution",
+                        xaxis_title="Hour of Day", yaxis_title="Hours",
+                        template='plotly_dark', hovermode='x unified',
+                        xaxis_tickangle=-45
+                    )
+                    st.plotly_chart(_fig_eh, width='stretch', key="daily_essential_hourly_dist")
+                else:
+                    st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
+
+
+
+            st.divider()
+
             # ════════════════════════════════════════════════════════════════════════════════
             # SECTION 1: SINGLE DATE ANALYSIS (24-Hour Breakdown for Selected Date)
             # ════════════════════════════════════════════════════════════════════════════════
@@ -3243,10 +3379,10 @@ elif menu == "Productivity Analysis":
             # Date picker for 24-hour analysis
             _tod_col1, _tod_col2 = st.columns([1, 4])
             with _tod_col1:
-                selected_date_td = st.date_input("📅 Select Date", value=pd.to_datetime(list(df['date'])[-1] if not df.empty else date.today()).date() if not df.empty else date.today(), key="24h_date_picker")
+                selected_date_td = st.date_input("📅 Select Date", value=pd.to_datetime(list(df_daily['date'])[-1] if not df_daily.empty else date.today()).date() if not df_daily.empty else date.today(), key="24h_date_picker")
             
             # Filter data for selected date
-            df_selected = df[pd.to_datetime(df['date']).dt.date == selected_date_td]
+            df_selected = df_daily[pd.to_datetime(df_daily['date']).dt.date == selected_date_td]
             
             # --- NEW: Get sleep intervals for the selected date ---
             sel_date_str = str(selected_date_td)
@@ -3298,14 +3434,14 @@ elif menu == "Productivity Analysis":
             else:
                 st.info(f"📝 No hourly data for {selected_date_td}.")
 
-            # --- NEW: TOP 5 HOURLY SLOTS (OVERALL) ---
-            st.markdown("### 🔝 Top 5 Productive & Waste Hours (Historical)")
+            # --- NEW: TOP 10 HOURLY SLOTS (OVERALL) ---
+            st.markdown("### 🔝 Top 10 Productive & Waste Hours (Historical)")
             st.markdown("*Most productive and most wasted hours of the day based on your entire history*")
             
             t5_col1, t5_col2 = st.columns(2)
             with t5_col1:
-                st.markdown("🎯 **Top 5 Productive Hours**")
-                t5_prod = get_top_hours_all_time(df, type='productive')
+                st.markdown("🎯 **Top 10 Productive Hours**")
+                t5_prod = get_top_hours_all_time(df_daily, type='productive')
                 if t5_prod:
                     t5_prod_df = pd.DataFrame(t5_prod)
                     st.dataframe(t5_prod_df[['time', 'duration']], 
@@ -3315,8 +3451,8 @@ elif menu == "Productivity Analysis":
                     st.caption("No data yet.")
             
             with t5_col2:
-                st.markdown("⚠️ **Top 5 Waste Hours**")
-                t5_waste = get_top_hours_all_time(df, type='waste')
+                st.markdown("⚠️ **Top 10 Waste Hours**")
+                t5_waste = get_top_hours_all_time(df_daily, type='waste')
                 if t5_waste:
                     t5_waste_df = pd.DataFrame(t5_waste)
                     st.dataframe(t5_waste_df[['time', 'duration']], 
@@ -3375,7 +3511,7 @@ elif menu == "Productivity Analysis":
                 
                 prod_m      = month_df[month_df['type'].isin(ALL_PRODUCTIVE)]
                 essential_m = month_df[month_df['type'].isin(ALL_ESSENTIAL)]
-                waste_m     = month_df[~month_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL)]
+                waste_m     = month_df[~month_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
 
                 pm1, pm2, pm3, pm4 = st.columns(4)
                 pm1.metric("Productive Hrs", f"{round(prod_m['duration'].sum(),1)}h")
@@ -3432,9 +3568,9 @@ elif menu == "Productivity Analysis":
                                          title=f"Stacked Time per Day — {month_str}")
                     st.plotly_chart(fig_mt, width='stretch', key=f"monthly_stacked_{month_str}")
 
-                study_m = prod_m[prod_m['type'] == 'Study']
+                study_m = prod_m[prod_m['type'].isin(['Study', 'Revision'])]
                 if not study_m.empty:
-                    st.markdown("**📚 Subject-wise Productive Hours**")
+                    st.markdown("**📚 Subject-wise Study & Revision Hours**")
                     subj_m_df = study_m.groupby('subject')['duration'].sum().sort_values(ascending=False).reset_index()
                     st.dataframe(subj_m_df.rename(columns={'subject':'Subject','duration':'Hours'}),
                                  width='stretch')
@@ -3466,7 +3602,7 @@ elif menu == "Productivity Analysis":
                     else:
                         _filtered_waste_m = waste_m.copy()
 
-                    waste_m_tbl = _filtered_waste_m.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date')
+                    waste_m_tbl = _filtered_waste_m.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date', ascending=False)
                     st.markdown("**📋 Waste Entries Table**")
                     st.dataframe(waste_m_tbl.rename(columns={'date':'Date','type':'Activity','duration':'Hours'}),
                                  width='stretch')
@@ -3523,8 +3659,8 @@ elif menu == "Productivity Analysis":
                 st.divider()
                 st.markdown(f"### 📈 Advanced Monthly Insights — {month_str}")
                 
-                # Top 5 Study Streaks in Month
-                st.markdown("#### 🔥 Top 5 Study Streaks")
+                # Top 10 Study Streaks in Month
+                st.markdown("#### 🔥 Top 10 Study Streaks")
                 m_streaks = calculate_top_streaks(month_df) # No need to pass year/month since month_df is already filtered
                 if m_streaks:
                     st.dataframe(pd.DataFrame(m_streaks), 
@@ -3533,11 +3669,11 @@ elif menu == "Productivity Analysis":
                 else:
                     st.caption("No streaks found for this month.")
 
-                # Top 5 Study Days in Month (Weekday vs Weekend)
+                # Top 10 Study Days in Month (Weekday vs Weekend)
                 st.markdown("#### 🏆 Top Study Days & Content")
                 wd_col, we_col = st.columns(2)
                 with wd_col:
-                    st.markdown("📅 **Top 5 Weekdays**")
+                    st.markdown("📅 **Top 10 Weekdays**")
                     top_wd = get_top_study_days(month_df, is_weekend=False)
                     if not top_wd.empty:
                         st.dataframe(top_wd[['date', 'hours', 'readings']], 
@@ -3547,7 +3683,7 @@ elif menu == "Productivity Analysis":
                         st.caption("No weekday study data.")
                 
                 with we_col:
-                    st.markdown("Weekend **Top 5 Weekends**")
+                    st.markdown("Weekend **Top 10 Weekends**")
                     top_we = get_top_study_days(month_df, is_weekend=True)
                     if not top_we.empty:
                         st.dataframe(top_we[['date', 'hours', 'readings']], 
@@ -3649,22 +3785,25 @@ elif menu == "Productivity Analysis":
                                     hourly_json = cumul_24h[cumul_24h['productivity_%'] > 0][['hour', 'productivity_%', 'waste_%']].to_json(orient='records')
                                     
                                     prompt = (
-                                        f"As 'Esu', analyze my study patterns for {month_str}:\n"
-                                        f"MONTHLY DATA: {recent_json}\n\n"
-                                        f"HOURLY AVG PATTERNS: {hourly_json}\n\n"
-                                        f"PEAK HOUR: {peak_hour} ({peak_prod:.0f}%)\n"
-                                        f"LOWEST HOUR: {low_hour} ({low_prod:.0f}%)\n\n"
-                                        f"1. Summarize my performance for this month.\n"
-                                        f"2. Identify my 'Prime Time' and 'Danger Zones'.\n"
-                                        f"3. Provide 3 specific recommendations for next month.\n"
-                                        f"Keep it professional and encouraging."
+                                        f"You are Esu, an elite productivity analyst. Analyze study patterns for {month_str}.\n\n"
+                                        f"MONTHLY DATA (recent entries): {recent_json}\n\n"
+                                        f"HOURLY PATTERNS: {hourly_json}\n\n"
+                                        f"PEAK HOUR: {peak_hour} ({peak_prod:.0f}%) | LOWEST HOUR: {low_hour} ({low_prod:.0f}%)\n\n"
+                                        f"RESPOND WITH:\n\n"
+                                        f"## 📊 Monthly Performance Summary\n"
+                                        f"| Metric | Value | Verdict |\n"
+                                        f"|--------|-------|---------|\n"
+                                        f"(fill: total hours, productive %, peak time, worst time, consistency)\n\n"
+                                        f"## ⏰ Time Block Analysis\n"
+                                        f"| Time Block | Productivity | Best For | Recommendation |\n"
+                                        f"|------------|-------------|----------|----------------|\n"
+                                        f"(Morning/Afternoon/Evening/Night — what's working, what's not)\n\n"
+                                        f"## ⚡ Top 3 Actions for Next Month\n"
+                                        f"Numbered list with specific, measurable actions.\n"
                                     )
                                     ai_response = _ai_m.get_ai_insight(prompt)
-                                    st.markdown(f"""
-                                    <div style="background-color: #1a1a2e; border-left: 5px solid #4f46e5; padding: 20px; border-radius: 10px; color: #d1d5db;">
-                                        {ai_response}
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.markdown("---")
+                                    st.markdown(ai_response)
                             
                             # Tactical tips
                             low_productive_hours = cumul_24h[cumul_24h['productivity_%'] < 20]['hour'].tolist()
@@ -3727,7 +3866,7 @@ elif menu == "Productivity Analysis":
                 
                 prod_y      = year_df[year_df['type'].isin(ALL_PRODUCTIVE)]
                 essential_y = year_df[year_df['type'].isin(ALL_ESSENTIAL)]
-                waste_y     = year_df[~year_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL)]
+                waste_y     = year_df[~year_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
 
                 py1, py2, py3, py4 = st.columns(4)
                 py1.metric("Productive Hrs", f"{round(prod_y['duration'].sum(),1)}h")
@@ -3748,7 +3887,7 @@ elif menu == "Productivity Analysis":
                     else:
                         mp = mdata[mdata['type'].isin(ALL_PRODUCTIVE)]['duration'].sum()
                         me = mdata[mdata['type'].isin(ALL_ESSENTIAL)]['duration'].sum()
-                        mw = mdata[~mdata['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL)]['duration'].sum()
+                        mw = mdata[~mdata['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]['duration'].sum()
                         month_rows.append({'Month': mlabel, 'Productive': round(mp,1),
                                            'Essential': round(me,1), 'Waste': round(mw,1)})
                 yr_monthly_df = pd.DataFrame(month_rows)
@@ -3757,7 +3896,7 @@ elif menu == "Productivity Analysis":
                 st.markdown("### 📈 Productivity Analysis")
 
                 st.markdown("**📋 Month-by-Month Summary Table**")
-                st.dataframe(yr_monthly_df.set_index('Month'), width='stretch')
+                st.dataframe(yr_monthly_df.iloc[::-1].set_index('Month'), width='stretch')
 
                 fig_ym = go.Figure()
                 fig_ym.add_trace(go.Bar(x=yr_monthly_df['Month'], y=yr_monthly_df['Productive'],
@@ -3780,9 +3919,9 @@ elif menu == "Productivity Analysis":
                                       xaxis_title="Month", yaxis_title="Hours")
                 st.plotly_chart(fig_yl, width='stretch', key=f"yearly_trend_{int(sel_year_y)}")
 
-                study_y = prod_y[prod_y['type'] == 'Study']
+                study_y = prod_y[prod_y['type'].isin(['Study', 'Revision'])]
                 if not study_y.empty:
-                    st.markdown("**📚 Yearly Subject-wise Study Hours**")
+                    st.markdown("**📚 Yearly Subject-wise Study & Revision Hours**")
                     subj_y_df = study_y.groupby('subject')['duration'].sum().sort_values(ascending=False).reset_index()
                     st.dataframe(subj_y_df.rename(columns={'subject':'Subject','duration':'Hours'}),
                                  width='stretch')
@@ -3817,7 +3956,7 @@ elif menu == "Productivity Analysis":
                     else:
                         _filtered_waste_y = waste_y.copy()
 
-                    waste_y_tbl = _filtered_waste_y.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date')
+                    waste_y_tbl = _filtered_waste_y.groupby(['date','type'])['duration'].sum().reset_index().sort_values('date', ascending=False)
                     st.markdown("**📋 All Waste Entries**")
                     st.dataframe(waste_y_tbl.rename(columns={'date':'Date','type':'Activity','duration':'Hours'}),
                                  width='stretch')
@@ -3875,8 +4014,8 @@ elif menu == "Productivity Analysis":
                 st.divider()
                 st.markdown(f"### 📈 Advanced Yearly Insights — {int(sel_year_y)}")
                 
-                # Top 5 Study Streaks in Year
-                st.markdown("#### 🔥 Top 5 Study Streaks")
+                # Top 10 Study Streaks in Year
+                st.markdown("#### 🔥 Top 10 Study Streaks")
                 y_streaks = calculate_top_streaks(year_df)
                 if y_streaks:
                     st.dataframe(pd.DataFrame(y_streaks), 
@@ -3885,11 +4024,11 @@ elif menu == "Productivity Analysis":
                 else:
                     st.caption("No streaks found for this year.")
 
-                # Top 5 Study Days in Year (Weekday vs Weekend)
+                # Top 10 Study Days in Year (Weekday vs Weekend)
                 st.markdown("#### 🏆 Top Study Days & Content")
                 ywd_col, ywe_col = st.columns(2)
                 with ywd_col:
-                    st.markdown("📅 **Top 5 Weekdays**")
+                    st.markdown("📅 **Top 10 Weekdays**")
                     top_ywd = get_top_study_days(year_df, is_weekend=False)
                     if not top_ywd.empty:
                         st.dataframe(top_ywd[['date', 'hours', 'readings']], 
@@ -3899,7 +4038,7 @@ elif menu == "Productivity Analysis":
                         st.caption("No weekday study data.")
                 
                 with ywe_col:
-                    st.markdown("Weekend **Top 5 Weekends**")
+                    st.markdown("Weekend **Top 10 Weekends**")
                     top_ywe = get_top_study_days(year_df, is_weekend=True)
                     if not top_ywe.empty:
                         st.dataframe(top_ywe[['date', 'hours', 'readings']], 
@@ -3911,18 +4050,30 @@ elif menu == "Productivity Analysis":
                     st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
 
 elif menu == "Ask Esu":
-    st.title("🤖 Ask Esu - Personalized Study Assistant")
-    
     # Pre-load saved responses from database
     if "saved_esu_responses_db" not in st.session_state:
         st.session_state["saved_esu_responses_db"] = get_esu_responses(USER)
     
-    st.markdown("""
-    Esu is your personalized AI study assistant. Ask Esu any question about your study habits, productivity, 
-    weak subjects, or get a custom study plan. Esu analyzes all your data along with UPSC PYQ trends to provide tailored recommendations.
-    """)
-    
     import ai as _ai_esu
+    
+    # ── Hero Banner ──
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a5f 100%);
+        padding: 28px 30px 20px 30px; border-radius: 16px;
+        border: 1px solid #4f46e5; margin-bottom: 20px;
+        box-shadow: 0 8px 32px rgba(79, 70, 229, 0.15);
+    ">
+        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 8px;">
+            <span style="font-size: 32px;">🤖</span>
+            <h2 style="margin: 0; color: #e0e7ff; font-weight: 800; letter-spacing: -0.5px;">Ask Esu</h2>
+        </div>
+        <p style="margin: 0; color: #a5b4fc; font-size: 14px; line-height: 1.5;">
+            Your AI study mentor — ask anything about UPSC strategy, timetable, subject planning, or productivity.<br>
+            <span style="color: #818cf8;">💡 Mention your weak/strong subjects in the question for personalized answers.</span>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Get all data for analysis
     df_all = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
@@ -3932,15 +4083,14 @@ elif menu == "Ask Esu":
         df_all['chapter'] = df_all['chapter'].apply(get_clean_chapter)
     chapter_data = read_sql("SELECT * FROM chapters WHERE username=%s", (USER,))
     
-    # Load UPSC PYQ Analysis data from JSON file
+    # Load UPSC PYQ data (used by AI behind the scenes, not shown in UI)
     import json
     try:
         with open('pyq_data.json', 'r') as f:
             pyq_json_data = json.load(f)
             pyq_data_prelims = pyq_json_data.get('prelims', [])
             pyq_data_mains = pyq_json_data.get('mains', [])
-    except Exception as e:
-        st.warning(f"Could not load PYQ data: {e}")
+    except Exception:
         pyq_data_prelims = []
         pyq_data_mains = []
     
@@ -3971,104 +4121,31 @@ elif menu == "Ask Esu":
         else:
             chapter_completion_summary = {}
         
-        st.divider()
-        col1, col2 = st.columns([2, 1])
+        # ── Question Input ──
+        col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.subheader("📝 Your Question/Request")
             user_prompt = st.text_area(
-                "Ask Esu anything about your study habit, productivity, or request a personalized plan:",
-                placeholder="E.g., 'Help me improve my weak subjects', 'Create a 30-day study plan for UPSC', 'Focus on PYQ patterns'",
-                height=120,
+                "💬 What would you like to ask Esu?",
+                placeholder="Examples:\n• Create a 30-day timetable for UPSC Prelims\n• My weak subjects are Polity and Economy — what should I focus on?\n• Which topics have highest PYQ frequency in Geography?\n• How to reduce my waste time and study 10 hours daily?",
+                height=130,
                 key="esu_prompt"
             )
         
         with col2:
-            st.subheader("📅 Exam Date (Optional)")
             exam_date = st.date_input(
-                "If you have an exam coming up, select the date:",
+                "📅 Exam Date (optional)",
                 value=None,
                 key="esu_exam_date"
             )
             if exam_date:
                 days_left = (exam_date - pd.Timestamp.now().date()).days
-                st.info(f"⏱️ **Days until exam:** {days_left} days")
-        
-        st.divider()
-        
-        # Data Summary before asking - Now as Dropdown
-        with st.expander("📊 **Your Current Data Summary**", expanded=False):
-            col_summ1, col_summ2, col_summ3, col_summ4 = st.columns(4)
-            
-            with col_summ1:
-                st.metric("📚 Study Hours", f"{prod_total_esu:.1f}h")
-            with col_summ2:
-                st.metric("⚙️ Essential Hours", f"{essential_total_esu:.1f}h")
-            with col_summ3:
-                st.metric("⚠️ Waste Hours", f"{waste_total_esu:.1f}h")
-            with col_summ4:
-                st.metric("📖 Subjects", len(subj_data))
-            
-            # Subject breakdown
-            if subj_data:
-                st.markdown("**Subject-wise Study Hours:**")
-                subj_df_display = pd.DataFrame(list(subj_data.items()), columns=['Subject', 'Hours']).sort_values('Hours', ascending=False)
-                st.dataframe(subj_df_display, width='stretch', hide_index=True)
-        
-        st.divider()
-        
-        # Display UPSC PYQ Trends from JSON File - Now as Dropdowns
-        st.subheader("📈 UPSC PYQ Trends (Latest Database)")
-        
-        # Prelims dropdown
-        with st.expander("📋 **UPSC Prelims - Important Subjects**", expanded=False):
-            if pyq_data_prelims:
-                st.markdown("**Ranked by PYQ Frequency:**")
-                for subject_data in pyq_data_prelims:
-                    with st.expander(f"#{subject_data['frequency_rank']} {subject_data['subject']} (Importance: {subject_data['importance_score']}/100)", expanded=False):
-                        st.markdown(f"**📚 Important Chapters:** {subject_data['important_chapters']}")
-                        st.markdown(f"**🎯 Key Topics:** {subject_data['important_topics']}")
-                        st.markdown(f"**📖 Revision Strategy:** {subject_data['revision_strategy']}")
-            else:
-                st.info("No Prelims data available")
-        
-        # Mains dropdown
-        with st.expander("📘 **UPSC Mains - Important Subjects**", expanded=False):
-            if pyq_data_mains:
-                st.markdown("**Ranked by PYQ Frequency:**")
-                for subject_data in pyq_data_mains:
-                    with st.expander(f"#{subject_data['frequency_rank']} {subject_data['subject']} (Importance: {subject_data['importance_score']}/100)", expanded=False):
-                        st.markdown(f"**📚 Important Chapters:** {subject_data['important_chapters']}")
-                        st.markdown(f"**🎯 Key Topics:** {subject_data['important_topics']}")
-                        st.markdown(f"**📖 Revision Strategy:** {subject_data['revision_strategy']}")
-            else:
-                st.info("No Mains data available")
-        
-        # Weak subjects based on study hours
-        subj_series = pd.Series(subj_data)
-        avg_subj_hours = subj_series.mean()
-        weak_subjects_list = subj_series[subj_series < avg_subj_hours].index.tolist()
-        strong_subjects_list = subj_series[subj_series >= avg_subj_hours].index.tolist()
-        
-        analysis_col1, analysis_col2 = st.columns(2)
-        
-        with analysis_col1:
-            st.markdown("**⚠️ Weak Subjects (Below Average):**")
-            if weak_subjects_list:
-                for ws in weak_subjects_list:
-                    st.write(f"• {ws}: {subj_data.get(ws, 0):.1f}h")
-            else:
-                st.write("All well balanced!")
-        
-        with analysis_col2:
-            st.markdown("**✅ Strong Subjects (Above Average):**")
-            if strong_subjects_list:
-                for ss in strong_subjects_list:
-                    st.write(f"• {ss}: {subj_data.get(ss, 0):.1f}h")
-            else:
-                st.write("More focus needed on all!")
-        
-        st.divider()
+                st.markdown(f"""
+                <div style="background: #1e293b; padding: 10px; border-radius: 10px; border: 1px solid #334155; text-align: center;">
+                    <div style="font-size: 24px; font-weight: 800; color: {'#f87171' if days_left < 30 else '#38bdf8'};">{days_left}</div>
+                    <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase;">Days Left</div>
+                </div>
+                """, unsafe_allow_html=True)
         
         # Generate Esu Response
         if st.button("💬 Ask Esu", type="primary", width='stretch'):
@@ -4076,55 +4153,46 @@ elif menu == "Ask Esu":
                 st.warning("Please enter a question or request for Esu!")
             else:
                 with st.spinner("🤔 Esu is thinking..."):
-                    # Prepare comprehensive context for Esu
-                    context = f"""
-                    User's Study Data Summary:
-                    - Total Study Hours: {prod_total_esu:.1f}h
-                    - Essential Hours (Work/Coaching): {essential_total_esu:.1f}h
-                    - Waste Time: {waste_total_esu:.1f}h
-                    - Number of Subjects: {len(subj_data)}
-                    - Subject Breakdown: {subj_data}
-                    - Total Tracked Hours: {prod_total_esu + essential_total_esu + waste_total_esu:.1f}h
-                    """
+                    # Prepare LEAN context — only factual data, no labels
+                    context = f"""User's Study Data (for reference only):
+- Total Study Hours: {prod_total_esu:.1f}h
+- Essential Hours (Work/Coaching): {essential_total_esu:.1f}h
+- Waste Time: {waste_total_esu:.1f}h
+- Subjects Studied: {len(subj_data)}
+- Subject Hours: {subj_data}
+- Total Tracked Hours: {prod_total_esu + essential_total_esu + waste_total_esu:.1f}h"""
                     
-                    # Add subject analysis
-                    if weak_subjects_list:
-                        context += f"\n- Weak Subjects (Below Average Study): {', '.join(weak_subjects_list)}"
-                    if strong_subjects_list:
-                        context += f"\n- Strong Subjects (Above Average Study): {', '.join(strong_subjects_list)}"
-                    
-                    # Add chapter data
+                    # Add chapter completion if available
                     if chapter_completion_summary:
-                        context += f"\n- Chapter Completion Status: {chapter_completion_summary}"
+                        context += f"\n- Chapter Completion: {chapter_completion_summary}"
                     
-                    # Add UPSC PYQ data from JSON
-                    if pyq_data_prelims:
-                        context += "\n\nUPSC PRELIMS - Important Subjects by PYQ Frequency:"
-                        for subject_data in pyq_data_prelims:
-                            context += f"\n  {subject_data['frequency_rank']}. {subject_data['subject']} (Importance: {subject_data['importance_score']}/100)"
-                            context += f"\n     Important Chapters: {subject_data['important_chapters']}"
-                            context += f"\n     Key Topics: {subject_data['important_topics']}"
-                            context += f"\n     Revision Strategy: {subject_data['revision_strategy']}"
-                    
-                    if pyq_data_mains:
-                        context += "\n\nUPSC MAINS - Important Subjects by PYQ Frequency:"
-                        for subject_data in pyq_data_mains:
-                            context += f"\n  {subject_data['frequency_rank']}. {subject_data['subject']} (Importance: {subject_data['importance_score']}/100)"
-                            context += f"\n     Important Chapters: {subject_data['important_chapters']}"
-                            context += f"\n     Key Topics: {subject_data['important_topics']}"
-                            context += f"\n     Revision Strategy: {subject_data['revision_strategy']}"
-                    
+                    # Add exam timeline if set
                     if exam_date:
-                        context += f"\n\nExam Timeline:"
+                        context += f"\n\nExam Info:"
                         context += f"\n- Exam Date: {exam_date.strftime('%B %d, %Y')}"
                         context += f"\n- Days Remaining: {days_left} days"
-                        context += f"\n- Available Study Hours: {prod_total_esu:.1f}h (current)"
-                        context += f"\n- Required Daily Hours: ~{(prod_total_esu/(days_left+1)):.1f}h (if distributed evenly)"
-                        context += "\n- Focus: Exam-focused study plan with PYQ patterns and time optimization"
                     
-                    # Call AI for personalized response
+                    # Build rich PYQ context (used by AI only when question is study-related)
+                    pyq_context = ""
+                    if pyq_data_prelims:
+                        pyq_context += "PRELIMS PYQ Subject Rankings:\n"
+                        for s in pyq_data_prelims:
+                            pyq_context += f"\n#{s['frequency_rank']} {s['subject']} (Importance: {s['importance_score']}/100)"
+                            pyq_context += f"\n  Chapters: {s['important_chapters']}"
+                            pyq_context += f"\n  Topics: {s['important_topics']}"
+                            pyq_context += f"\n  Strategy: {s['revision_strategy']}"
+                    
+                    if pyq_data_mains:
+                        pyq_context += "\n\nMAINS PYQ Subject Rankings:\n"
+                        for s in pyq_data_mains:
+                            pyq_context += f"\n#{s['frequency_rank']} {s['subject']} (Importance: {s['importance_score']}/100)"
+                            pyq_context += f"\n  Chapters: {s['important_chapters']}"
+                            pyq_context += f"\n  Topics: {s['important_topics']}"
+                            pyq_context += f"\n  Strategy: {s['revision_strategy']}"
+                    
+                    # Call AI with smart context injection
                     try:
-                        esu_response = _ai_esu.ask_esu(user_prompt, context)
+                        esu_response = _ai_esu.ask_esu(user_prompt, context, pyq_context)
                         st.session_state["esu_response"] = esu_response
                         st.session_state["esu_last_question"] = user_prompt
                     except Exception as e:
@@ -4138,19 +4206,18 @@ elif menu == "Ask Esu":
                 background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
                 border: 2px solid #6366f1;
                 border-radius: 15px;
-                padding: 25px;
-                margin-bottom: 20px;
+                padding: 20px 25px 10px 25px;
+                margin-bottom: 5px;
                 box-shadow: 0 10px 25px rgba(0,0,0,0.3);
             ">
-                <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; margin-bottom: 5px;">
                     <span style="font-size: 24px; margin-right: 15px;">🤖</span>
                     <h3 style="margin: 0; color: #e0e7ff; font-weight: 700;">Esu's Guidance</h3>
                 </div>
-                <div style="color: #cbd5e1; line-height: 1.6; font-size: 16px;">
-                    {st.session_state["esu_response"]}
-                </div>
             </div>
             """, unsafe_allow_html=True)
+            # Render response as proper markdown so tables, headers, bullets render correctly
+            st.markdown(st.session_state["esu_response"])
             
             col_resp1, col_resp2, col_resp3 = st.columns(3)
             with col_resp1:
@@ -4231,63 +4298,144 @@ elif menu == "Expenses":
     st.title("💰 Expenses")
     import ai as _ai_exp
 
-    df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
-    df = df[df['amount'] > 0]
+    df_full = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    df_full = df_full[df_full['amount'] > 0]
 
-    if not df.empty:
-        total_exp = df['amount'].sum()
+    # Keep only last 60 days for expense view
+    if not df_full.empty:
+        cutoff_date = (date.today() - timedelta(days=60)).strftime('%Y-%m-%d')
+        df = df_full[df_full['date'] >= cutoff_date].copy()
+    else:
+        df = df_full.copy()
+
+    if not df_full.empty:
+        df_full['month_str'] = pd.to_datetime(df_full['date']).dt.strftime('%Y-%m')
+        current_month_str = date.today().strftime('%Y-%m')
+        current_month_exp = df_full[df_full['month_str'] == current_month_str]['amount'].sum()
+        current_month_cats = df_full[df_full['month_str'] == current_month_str]['type'].nunique()
+
         e1, e2 = st.columns(2)
-        e1.metric("Total Expenses", f"₹{round(total_exp, 2)}")
-        e2.metric("Categories", f"{df['type'].nunique()}")
+        e1.metric(f"Current Month Expenses ({current_month_str})", f"₹{round(current_month_exp, 2)}")
+        e2.metric("Categories (Current Month)", f"{current_month_cats}")
 
-        # TABLE FIRST
-        st.markdown("**📋 All Expense Entries**")
-        exp_tbl = df[['date','type','subject','amount']].sort_values('date', ascending=False)
-        st.dataframe(exp_tbl.rename(columns={'date':'Date','type':'Category','subject':'Details','amount':'Amount (₹)'}),
-                     width='stretch')
+        st.markdown("### 📅 Month-wise Expenses")
+        month_wise_exp = df_full.groupby('month_str')['amount'].sum().reset_index().sort_values('month_str', ascending=False)
+        st.dataframe(month_wise_exp.rename(columns={'month_str': 'Month', 'amount': 'Total Expense (₹)'}), width='stretch', hide_index=True)
 
-        # Charts side by side
-        col_eb, col_ep = st.columns(2)
-        with col_eb:
+        st.markdown("### 🔍 Category Breakdown by Month")
+        selected_month = st.selectbox("Select Month", month_wise_exp['month_str'].tolist())
+        if selected_month:
+            month_df = df_full[df_full['month_str'] == selected_month]
+            month_exp_grp = month_df.groupby('type')['amount'].sum().sort_values(ascending=False)
+            
+            col_eb, col_ep = st.columns(2)
+            with col_eb:
+                st.dataframe(month_exp_grp.reset_index().rename(columns={'type':'Category', 'amount':'Amount (₹)'}), width='stretch', hide_index=True)
+            with col_ep:
+                fig_ep = px.pie(month_exp_grp.reset_index(), names='type', values='amount',
+                                title=f"Expense Distribution ({selected_month})",
+                                color_discrete_sequence=px.colors.qualitative.Set3)
+                st.plotly_chart(fig_ep, width='stretch', key="expenses_pie_monthly")
+
+        # Variables needed for 60-day summary below
+        if not df.empty:
+            total_exp = df['amount'].sum()
             exp_grp = df.groupby('type')['amount'].sum().sort_values(ascending=False)
-            st.bar_chart(exp_grp)
-        with col_ep:
-            fig_ep = px.pie(exp_grp.reset_index(), names='type', values='amount',
-                            title="Expense Distribution",
-                            color_discrete_sequence=px.colors.qualitative.Set3)
-            st.plotly_chart(fig_ep, width='stretch', key="expenses_pie")
+        else:
+            total_exp = 0
+            exp_grp = pd.Series(dtype=float)
+
+        # ── NEW: EXPENSE TREND GRAPHS (RESTRUCTURED) ─────────────────────────
+        st.divider()
+        st.markdown("### 📈 Expense Trend Analysis")
+        
+        # Prepare date-time features
+        df_exp = df_full.copy()
+        df_exp['date_dt'] = pd.to_datetime(df_exp['date'])
+        df_exp['hour'] = df_exp.apply(extract_hour_from_row, axis=1)
+        df_exp['day_name'] = df_exp['date_dt'].dt.day_name()
+        df_exp['month_str'] = df_exp['date_dt'].dt.strftime('%Y-%m')
+        df_exp['year'] = df_exp['date_dt'].dt.year
+        
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # 1. Hourly Distribution
+        st.markdown("#### ⏰ Hourly Distribution")
+        h_exp = df_exp.dropna(subset=['hour']).groupby('hour')['amount'].sum().reset_index()
+        if not h_exp.empty:
+            h_all = pd.DataFrame({'hour': range(24)})
+            h_full = h_all.merge(h_exp, on='hour', how='left').fillna(0)
+            h_full['hour_label'] = h_full['hour'].apply(lambda h: f"{h:02d}:00")
+            fig_h = px.line(h_full, x='hour_label', y='amount', markers=True,
+                           title="Expenses by Hour of Day",
+                           labels={'hour_label': 'Hour', 'amount': 'Amount (₹)'},
+                           color_discrete_sequence=['#f59e0b'])
+            st.plotly_chart(fig_h, width='stretch', key="exp_hourly_line")
+        else:
+            st.caption("No hourly data available.")
+
+        # 2. Weekday Distribution
+        st.markdown("#### 📅 Weekday Distribution")
+        d_exp = df_exp.groupby('day_name')['amount'].sum().reindex(days_order).reset_index().fillna(0)
+        fig_d = px.line(d_exp, x='day_name', y='amount', markers=True,
+                       title="Expenses by Day of Week",
+                       labels={'day_name': 'Day', 'amount': 'Amount (₹)'},
+                       color_discrete_sequence=['#3b82f6'])
+        st.plotly_chart(fig_d, width='stretch', key="exp_daywise_line")
+
+        # 3. Daily Trend (requested as 'month-wise' date trend)
+        st.markdown("#### 📆 Daily Trend (Month-wise Resolution)")
+        daily_exp = df.groupby('date')['amount'].sum().reset_index().sort_values('date')
+        fig_daily = px.line(daily_exp, x='date', y='amount', markers=True,
+                           title="Daily Expense Trend",
+                           labels={'date': 'Date', 'amount': 'Amount (₹)'},
+                           color_discrete_sequence=['#10b981'])
+        st.plotly_chart(fig_daily, width='stretch', key="exp_daily_trend")
+
+        # 4. Monthly Trend (requested as 'year-wise' month trend)
+        st.markdown("#### 📊 Monthly Trend (Year-wise Resolution)")
+        m_exp = df_exp.groupby('month_str')['amount'].sum().reset_index().sort_values('month_str')
+        fig_m = px.line(m_exp, x='month_str', y='amount', markers=True,
+                       title="Monthly Expense Trend",
+                       labels={'month_str': 'Month', 'amount': 'Amount (₹)'},
+                       color_discrete_sequence=['#8b5cf6'])
+        st.plotly_chart(fig_m, width='stretch', key="exp_monthly_trend")
 
         # Expense Summary Analysis
         st.divider()
-        st.markdown("### 📊 Expense Analysis Summary")
+        st.markdown("### 📊 Expense Analysis Summary (All Time)")
         
         exp_stats_col1, exp_stats_col2, exp_stats_col3, exp_stats_col4 = st.columns(4)
         
+        total_exp_full = df_full['amount'].sum()
+        
         with exp_stats_col1:
-            st.metric("Total Expenses", f"₹{total_exp:.0f}")
+            st.metric("Total Expenses", f"₹{total_exp_full:.0f}")
         with exp_stats_col2:
-            avg_exp = df['amount'].mean()
-            st.metric("Average Expense", f"₹{avg_exp:.0f}")
+            avg_exp = df_full['amount'].mean()
+            st.metric("Average Expense", f"₹{avg_exp:.0f}" if pd.notna(avg_exp) else "₹0")
         with exp_stats_col3:
-            max_category = exp_grp.idxmax()
-            max_amount = exp_grp.max()
+            full_exp_grp = df_full.groupby('type')['amount'].sum().sort_values(ascending=False)
+            max_category = full_exp_grp.idxmax() if not full_exp_grp.empty else "N/A"
+            max_amount = full_exp_grp.max() if not full_exp_grp.empty else 0
             st.metric("Highest Category", max_category, f"₹{max_amount:.0f}")
         with exp_stats_col4:
-            highest_day = df.groupby('date')['amount'].sum().idxmax()
-            highest_day_amount = df.groupby('date')['amount'].sum().max()
+            day_grp = df_full.groupby('date')['amount'].sum()
+            highest_day = day_grp.idxmax() if not day_grp.empty else "N/A"
+            highest_day_amount = day_grp.max() if not day_grp.empty else 0
             st.metric("Highest Spending Day", str(highest_day), f"₹{highest_day_amount:.0f}")
         
         # Category breakdown
         st.markdown("**Category Breakdown:**")
         exp_breakdown_col1, exp_breakdown_col2 = st.columns(2)
         with exp_breakdown_col1:
-            for category, amount in exp_grp.items():
-                pct = (amount / total_exp) * 100
+            for category, amount in full_exp_grp.items():
+                pct = (amount / total_exp_full) * 100 if total_exp_full > 0 else 0
                 st.markdown(f"- **{category}**: ₹{amount:.0f} ({pct:.1f}%)")
         with exp_breakdown_col2:
             # Daily average
-            daily_avg = df.groupby('date')['amount'].sum().mean()
-            st.info(f"📆 **Daily Average**: ₹{daily_avg:.0f}/day")
+            daily_avg = df_full.groupby('date')['amount'].sum().mean()
+            st.info(f"📆 **Daily Average**: ₹{daily_avg:.0f}/day" if pd.notna(daily_avg) else "📆 **Daily Average**: ₹0/day")
         
         st.info("💡 Use the **Ask Esu** page to get personalized expense optimization and budgeting strategies.")
 
@@ -4362,7 +4510,7 @@ elif menu == "Manage Users":
     # ── Existing Users List ──
     st.subheader("📋 Current System Access")
     try:
-        df_users = read_sql("SELECT id, username, last_login FROM users ORDER BY id")
+        df_users = read_sql("SELECT id, username, password, last_login FROM users ORDER BY id")
         for _, row in df_users.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
@@ -4378,7 +4526,7 @@ elif menu == "Manage Users":
                 else:
                     l_log_str = "Never"
                     
-                c1.write(f"👤 **{row['username']}** (ID: {row['id']})  \n🕒 Last Login: `{l_log_str}`")
+                c1.write(f"👤 **{row['username']}** (ID: {row['id']}) — 🔑 Password: `{row['password']}`  \n🕒 Last Login: `{l_log_str}`")
                 if row['username'] != 'admin':
                     if c2.button("Delete", key=f"del_{row['id']}", help="Remove user access"):
                         st.session_state[f"conf_del_{row['id']}"] = True
