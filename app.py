@@ -1022,12 +1022,18 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                         ]
                         ffmpeg_exe = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
                         for pb in potential_bins:
-                            target = os.path.join(pb, ffmpeg_exe)
+                            target_exe = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
+                            target = os.path.join(pb, target_exe)
                             if os.path.exists(target):
                                 ffmpeg_location = target
                                 break
                     except:
                         pass
+                
+                # Ultimate fallback for Streamlit Cloud (Linux) if static_ffmpeg doesn't work out of the box
+                if not ffmpeg_location and os.name != 'nt':
+                    if os.path.exists("/usr/bin/ffmpeg"):
+                        ffmpeg_location = "/usr/bin/ffmpeg"
 
                 # 2. Check for Node.js (required for 'n challenge' signature decryption)
                 # Streamlit Cloud usually has nodejs if added to packages.txt
@@ -1105,9 +1111,13 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                             c.extend(["--referer", "https://www.youtube.com/"])
                             return c
 
-                        # Set initial strategy to iOS (currently the most resilient against bot-checks)
-                        initial_strat = "ios,android_music,android"
+                        # Set initial strategy to Android VR (currently the most resilient against n-challenge without JS)
+                        # We also try android_music and ios.
+                        initial_strat = "android,android_music,ios"
                         full_cmd = get_cmd_for_strat(cmd, initial_strat)
+                        
+                        # Add these to completely bypass the need for a JS runtime in yt-dlp
+                        full_cmd.extend(["--extractor-args", "youtube:player_skip=js;youtube:player_client=android"])
                         
                         # Set ffmpeg location if we found a non-system one
                         if ffmpeg_location and not shutil.which("ffmpeg"):
@@ -1161,10 +1171,16 @@ if menu == "Media Player" and (USER_CONFIG.get("can_access_music") or USER == "a
                                     st.warning(f"⚠️ Rate limited on {strat}. Pausing...")
                                     time.sleep(2)
                         
-                        # Cleanup cookie file
+                        # Cleanup cookie file and any leftover webm/m4a files
                         if cookie_file_path and os.path.exists(cookie_file_path):
                             try: os.remove(cookie_file_path)
                             except: pass
+                        
+                        # Sometimes yt-dlp leaves behind .webm or .m4a if ffmpeg conversion fails partially
+                        for f in os.listdir("."):
+                            if f.endswith(".webm") or f.endswith(".m4a") or f.endswith(".part") or f.endswith(".ytdl"):
+                                try: os.remove(f)
+                                except: pass
                         
                         if result.returncode == 0:
                             # Upload to Supabase if available
@@ -1478,6 +1494,16 @@ if menu == "Daily Entry":
         sub1 = st.selectbox("Test Type", test_types)
         sub2 = st.text_input("#Questions")
 
+    elif activity == "Office":
+        sub1 = st.text_input("Work Done / Notes", key="de_office_notes", placeholder="e.g., Project meeting, Code review")
+
+    elif activity == "Coaching":
+        sub1 = st.text_input("Subject / Topic", key="de_coaching_topic", placeholder="e.g., Mathematics, Physics lecture")
+        sub2 = st.text_input("Notes", key="de_coaching_notes", placeholder="e.g., Chapter covered, homework")
+
+    elif activity == "WFH":
+        sub1 = st.text_input("Work Done / Notes", key="de_wfh_notes", placeholder="e.g., Client calls, Report writing")
+
     elif activity == "Entertainment":
         sub1 = st.selectbox("Type", ent_types)
         if sub1 == "Movie":
@@ -1506,7 +1532,8 @@ if menu == "Daily Entry":
 
     # Auto-determine tracking type based on activity type
     # Activities that track both hours and expense
-    _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling"]
+    _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling",
+                               "Office", "WFH", "Coaching", "Test"]
     _track_by_expense = activity in ["Food", "Transport"]
     
     if activity in custom:
