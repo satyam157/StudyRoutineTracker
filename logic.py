@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 import re
+from database import get_ist_now
 
 study_subjects = [
     "Polity","Ancient","Medieval","Modern","Art&Culture","Economics",
@@ -10,12 +11,13 @@ study_subjects = [
 
 ent_types = ["Movie","Sports","friendMeetup"]
 movie_modes = ["Room","Outside"]
-social_platform = ["YouTube","Instagram"]
-content_type = ["Stories/Chat","DoomScrolling"]
+social_platform = ["SocialMediaHopping (Loneliness - Good)", "Instagram", "YouTube", "Snapchat", "LinkedIn", "Twitter", "WhatsApp", "Other"]
+talkoncall_withwhom = ["Bestie", "Parent", "Friend", "Other"]
+content_type = ["Stories/Chat"]
 food_sources = ["Swiggy","Zomato","Outside"]
 transport_services = ["Uber","Ola","Rapido"]
 
-test_types = ["Mock Test","Sectional","PYQ"]
+test_types = ["Mock Test","Sectional","PYQ", "D-Day Exam"]
 
 PRODUCTIVE_TYPES = ["Study","Revision","Test", "Book Reading", "Answer Writing", "Practice"]
 ESSENTIAL_TYPES = ["Coaching", "Office", "WFH"]
@@ -93,7 +95,7 @@ def completion_percent(total, done):
     return round((done/total)*100,1) if total>0 else 0
 
 
-def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
+def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None, sleep_intervals_dict=None):
     """
     Calculate productivity percentage. 
     Formula: (productive_hours / available_hours) * 100
@@ -103,21 +105,19 @@ def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
     if df.empty: 
         return 0
     
-    productive = df[df['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
-    essential = df[df['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
-    neutral = df[df['type'].isin(NEUTRAL_TYPES)]['duration'].sum()
-    
-    # Get unique dates in the dataframe
-    unique_dates = pd.to_datetime(df['date']).unique()
-    
-    # Current time info
-    now = datetime.now()
+    # Current time info (IST)
+    now = get_ist_now()
     today_str = now.strftime('%Y-%m-%d')
     current_hour = now.hour + now.minute / 60.0
     
+    # Calculate adjusted totals by date to handle sleep overlap properly
+    total_productive, total_essential, _ = get_adjusted_sums(df, sleep_intervals_dict)
+
+    # Get unique dates in the dataframe
+    unique_dates = pd.to_datetime(df['date']).unique()
+    
     total_day_limit = 0
     total_sleep_hours = 0
-    total_powernap_hours = 0
     
     for date in unique_dates:
         if hasattr(date, 'date'): date_str = str(date.date())
@@ -139,20 +139,13 @@ def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None):
             elif isinstance(sleep_hours, (int, float)):
                 total_sleep_hours += sleep_hours
 
-        # Calculate powernap hours for this date
-        if powernap_hours is not None:
-            if isinstance(powernap_hours, dict):
-                total_powernap_hours += powernap_hours.get(date_str, 0)
-            elif isinstance(powernap_hours, (int, float)):
-                total_powernap_hours += powernap_hours
-
-    # Previous Logic: available_hours = (total_day_limit - sleep - essential)
-    available_hours = total_day_limit - total_sleep_hours - essential
+    # available_hours = (total_day_limit - sleep - essential)
+    available_hours = total_day_limit - total_sleep_hours - total_essential
     
     if available_hours <= 0:
         return 0
     
-    return round((productive / available_hours) * 100, 2)
+    return round((total_productive / available_hours) * 100, 2)
 
 
 def streak(df: pd.DataFrame):
@@ -180,7 +173,7 @@ def streak(df: pd.DataFrame):
         return 0
 
 # -------- NEW: DAILY REPORT --------
-def daily_report(df, sleep_data=None, powernap_data=None):
+def daily_report(df, sleep_data=None, powernap_data=None, sleep_intervals_dict=None):
     """
     Generate daily productivity report.
     Uses time passed till now for the current date.
@@ -189,6 +182,7 @@ def daily_report(df, sleep_data=None, powernap_data=None):
         df: DataFrame with activity data
         sleep_data: Optional dict mapping dates to sleep hours
         powernap_data: Optional dict mapping dates to powernap hours
+        sleep_intervals_dict: Optional dict mapping dates to list of (start, end) intervals
     
     Returns:
         DataFrame with daily report including productivity_% excluding sleep and essential hours
@@ -200,19 +194,22 @@ def daily_report(df, sleep_data=None, powernap_data=None):
         sleep_data = {}
     if powernap_data is None:
         powernap_data = {}
+    if sleep_intervals_dict is None:
+        sleep_intervals_dict = {}
 
     report = []
-    now = datetime.now()
+    now = get_ist_now()
     today_str = now.strftime('%Y-%m-%d')
     current_hour = now.hour + now.minute / 60.0
 
     for d, g in df.groupby('date'):
-        productive = g[g['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
-        essential = g[g['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
-        neutral = g[g['type'].isin(NEUTRAL_TYPES)]['duration'].sum()
+        date_str = str(d)
+        intervals = sleep_intervals_dict.get(date_str, [])
+        
+        # Use helper for adjusted sums
+        productive, essential, waste_logged = get_adjusted_sums(g, {date_str: intervals})
         
         # Get sleep and powernap hours
-        date_str = str(d)
         sleep_hours = sleep_data.get(date_str, 0)
         powernap_hours = powernap_data.get(date_str, 0)
         
@@ -222,10 +219,10 @@ def daily_report(df, sleep_data=None, powernap_data=None):
         # Previous logic for scores: available = day_limit - sleep - essential
         available_for_score = day_limit - sleep_hours - essential
         
-        # New logic for waste hours: calculated strictly as (day_limit - sleep - essential - productive)
+        # New logic for waste hours: (day_limit - sleep - essential - productive)
         waste = max(0, day_limit - sleep_hours - essential - productive)
         
-        # Calculate productivity score based on PREVIOUS logic
+        # Calculate productivity score
         if available_for_score > 0:
             score = round((productive / available_for_score) * 100, 2)
             waste_score = round((waste / available_for_score) * 100, 2)
@@ -385,12 +382,65 @@ def get_sleep_intervals(sleep_time_str, wakeup_time_str):
         
         if "PM" in str(sleep_time_str).upper():
             # e.g. 11 PM (23.0) to 6 AM (6.0)
-            return [(0, w_h)]
+            # Sleep spans from 23.0 to 24.0 AND 0.0 to 6.0
+            return [(s_h, 24.0), (0.0, w_h)]
         else:
             # e.g. 1 AM (1.0) to 6 AM (6.0)
+            if s_h > w_h:
+                # Slept at say 11 AM and woke at 6 AM? 
+                # This logic is a bit weird but let's follow the crossing midnight pattern
+                return [(s_h, 24.0), (0.0, w_h)]
             return [(s_h, w_h)]
     except:
         return []
+
+def calculate_overlap(seg_start, seg_end, intervals):
+    """Calculate total overlap duration between a segment [s, e] and a list of intervals."""
+    if not intervals:
+        return 0.0
+    total = 0.0
+    for i_start, i_end in intervals:
+        overlap = max(0.0, min(seg_end, i_end) - max(seg_start, i_start))
+        total += overlap
+    return total
+
+def get_adjusted_sums(df, sleep_intervals_dict=None):
+    """
+    Returns (productive, essential, waste_logged) sums after subtracting sleep overlaps.
+    """
+    if df.empty:
+        return 0.0, 0.0, 0.0
+    
+    if sleep_intervals_dict is None:
+        sleep_intervals_dict = {}
+        
+    total_prod = 0.0
+    total_ess = 0.0
+    total_waste = 0.0
+    
+    for d, g in df.groupby('date'):
+        date_str = str(d)
+        intervals = sleep_intervals_dict.get(date_str, [])
+        
+        for _, row in g.iterrows():
+            duration = float(row.get('duration', 0))
+            start_f = extract_float_hour(row)
+            
+            # Apply sleep overlap logic
+            if start_f is not None and intervals:
+                overlap = calculate_overlap(start_f, start_f + duration, intervals)
+                effective_duration = max(0.0, duration - overlap)
+            else:
+                effective_duration = duration
+                
+            if row['type'] in PRODUCTIVE_TYPES:
+                total_prod += effective_duration
+            elif row['type'] in ESSENTIAL_TYPES:
+                total_ess += effective_duration
+            elif row['type'] not in NEUTRAL_TYPES:
+                total_waste += effective_duration
+                
+    return total_prod, total_ess, total_waste
 
 def distribute_duration_across_hours(df, denom_days=1, sleep_intervals_list=None):
     """
@@ -441,13 +491,18 @@ def distribute_duration_across_hours(df, denom_days=1, sleep_intervals_list=None
             space_in_slot = (hour_idx + 1) - current_time
             to_fill = min(remaining, space_in_slot)
             
+            # --- OVERLAP LOGIC ---
+            # If sleep range collide or overlaps with any activity time range, consider that overlapping in sleep time
+            overlap_with_sleep = calculate_overlap(current_time, current_time + to_fill, sleep_intervals_list)
+            effective_fill = max(0.0, to_fill - overlap_with_sleep)
+            
             if is_prod:
-                prod_hrs[hour_idx] += to_fill
+                prod_hrs[hour_idx] += effective_fill
             elif is_essential:
-                essential_hrs[hour_idx] += to_fill
-            else:
-                # Logged waste and neutral go to waste
-                waste_hrs[hour_idx] += to_fill
+                essential_hrs[hour_idx] += effective_fill
+            elif not is_neutral:
+                # Logged waste goes to waste
+                waste_hrs[hour_idx] += effective_fill
             
             total_hrs_logged[hour_idx] += to_fill
             
@@ -455,7 +510,8 @@ def distribute_duration_across_hours(df, denom_days=1, sleep_intervals_list=None
             current_time += to_fill
 
     # 3. Calculate slot caps and fill gaps as Waste (Unlogged time)
-    now = datetime.now()
+    # IST adjustment
+    now = get_ist_now()
     today_str = now.strftime('%Y-%m-%d')
     current_hour_f = now.hour + now.minute / 60.0
     
@@ -793,196 +849,154 @@ def get_top_study_days(df: pd.DataFrame, year=None, month=None, is_weekend=None)
     return report_df
 
 
+def weekday_analysis(df, type_list, sleep_intervals_dict=None):
+    """
+    Aggregate hours by day of the week (Monday, Tuesday, etc.)
+    """
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Define the order
+    days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Calculate average hours per day of week
+    unique_dates = pd.to_datetime(df['date']).unique()
+    dates_series = pd.Series(unique_dates)
+    day_counts = dates_series.dt.day_name().value_counts().to_dict()
+    
+    # We need to calculate adjusted sums per date
+    results = []
+    for d, g in df.groupby('date'):
+        date_str = str(d)
+        day_name = pd.to_datetime(date_str).day_name()
+        
+        # Filter for requested types
+        filtered_g = g[g['type'].isin(type_list)]
+        
+        # Use helper for adjusted sums
+        prod, ess, waste = get_adjusted_sums(filtered_g, sleep_intervals_dict)
+        # Sum them up as we only care about the total for these types
+        total_adj = prod + ess + waste
+        
+        results.append({
+            'date': date_str,
+            'day_of_week': day_name,
+            'duration': total_adj
+        })
+    
+    res_df = pd.DataFrame(results)
+    if res_df.empty:
+        return pd.DataFrame()
+        
+    daily_avg = res_df.groupby('day_of_week')['duration'].sum().reset_index()
+    daily_avg['avg_hours'] = daily_avg.apply(lambda x: x['duration'] / day_counts.get(x['day_of_week'], 1), axis=1)
+    
+    # Reorder
+    daily_avg['day_of_week'] = pd.Categorical(daily_avg['day_of_week'], categories=days_order, ordered=True)
+    return daily_avg.sort_values('day_of_week')
+
+def sub_activity_trend(df, main_activity, sleep_intervals_dict=None):
+    """
+    Get trend data for sub-activities (stored in 'subject' column) of a main activity.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    
+    sub_df = df[df['type'] == main_activity].copy()
+    if sub_df.empty:
+        return pd.DataFrame()
+    
+    results = []
+    for d, g in sub_df.groupby('date'):
+        date_str = str(d)
+        intervals = sleep_intervals_dict.get(date_str, []) if sleep_intervals_dict else []
+        
+        for subj, sg in g.groupby('subject'):
+            # Calculate adjusted sum for this subject on this date
+            subj_total = 0.0
+            for _, row in sg.iterrows():
+                duration = float(row.get('duration', 0))
+                start_f = extract_float_hour(row)
+                if start_f is not None and intervals:
+                    overlap = calculate_overlap(start_f, start_f + duration, intervals)
+                    subj_total += max(0.0, duration - overlap)
+                else:
+                    subj_total += duration
+            
+            results.append({
+                'date': date_str,
+                'subject': subj,
+                'duration': subj_total
+            })
+            
+    return pd.DataFrame(results)
+
+
 # ════════════════════════════════════════════════════════════════════════
-# SMART WORK TIPS ENGINE — Data-driven, no AI calls needed
+# SMART WORK TIPS ENGINE — Now powered by smart_tips.py module
 # ════════════════════════════════════════════════════════════════════════
+from smart_tips import generate_smart_work_tips, render_smart_work_section
 
-def generate_smart_work_tips(prod_hours=0, waste_hours=0, essential_hours=0,
-                              study_streak=0, focus_pct=0, subject_count=0,
-                              productivity_pct=0, context="general"):
+def get_top_periods(daily_df, period_type, category):
     """
-    Generate contextual smart work tips based on user's actual data.
-    
-    Args:
-        prod_hours: Total productive study hours
-        waste_hours: Total waste hours
-        essential_hours: Total essential (work/coaching) hours
-        study_streak: Current study streak in days
-        focus_pct: Focus score (% of deep work sessions ≥ 2h)
-        subject_count: Number of subjects studied
-        productivity_pct: Overall productivity percentage
-        context: 'productivity' | 'target' | 'ask_esu' | 'general'
-    
-    Returns:
-        List of tip dicts: [{icon, category, tip, priority}]
+    Returns the top 10 periods (Day, Week, Month, Year) for a given category (productive, waste).
+    Takes in a daily_df (output of daily_report).
     """
-    tips = []
-    
-    # ── TECHNIQUE TIPS (always useful) ──
-    core_techniques = [
-        {"icon": "🍅", "category": "Pomodoro Technique",
-         "tip": "**25 min focus → 5 min break → repeat 4x → 30 min long break.** Best for subjects you find boring. Use a physical timer to avoid phone distraction."},
-        {"icon": "🧠", "category": "Active Recall",
-         "tip": "**Close the book and write everything you remember.** Then check what you missed. This builds 3x stronger memory than passive reading."},
-        {"icon": "📆", "category": "Spaced Repetition",
-         "tip": "**Revise on Day 1 → Day 3 → Day 7 → Day 21 → Day 45.** Mark revision dates in your calendar. Without this, you'll forget 80% within a week."},
-        {"icon": "🎯", "category": "Eat The Frog",
-         "tip": "**Do your hardest/most boring subject FIRST in the morning** when willpower is highest. Save easier subjects for evening when energy dips."},
-        {"icon": "📝", "category": "Feynman Technique",
-         "tip": "**Explain the topic as if teaching a 10-year-old.** Where you struggle to simplify = where you don't truly understand. Go back and study those gaps."},
-    ]
-    
-    # ── DATA-DRIVEN TIPS ──
-    
-    # Waste time analysis
-    if waste_hours > 0:
-        daily_waste = waste_hours  # Assume this is per-period
-        if daily_waste > 3:
-            tips.append({"icon": "🚫", "category": "Waste Recovery",
-                "tip": f"**You have {waste_hours:.0f}h of waste time.** Use the '2-Minute Rule': if tempted by distraction, tell yourself 'just 2 more minutes of study.' Your brain usually forgets the distraction. Install app blockers during study hours.",
-                "priority": 1})
-        elif daily_waste > 1:
-            tips.append({"icon": "⏰", "category": "Time Boxing",
-                "tip": f"**{waste_hours:.0f}h waste is recoverable.** Schedule specific 'guilt-free' leisure slots (e.g., 7-8 PM). Outside those slots, phone stays in another room. This eliminates 60-70% of casual waste.",
-                "priority": 2})
-    
-    # Focus score tips
-    if focus_pct < 30:
-        tips.append({"icon": "🔬", "category": "Deep Work",
-            "tip": "**Your deep work sessions (≥2h unbroken) are low.** Try 'Cave Mode': pick one subject, set a 2-hour timer, put phone in airplane mode, and work in complete silence. Even 1 deep session/day transforms results.",
-            "priority": 1})
-    elif focus_pct > 60:
-        tips.append({"icon": "💪", "category": "Deep Work Master",
-            "tip": f"**Your focus score is {focus_pct:.0f}% — excellent.** Protect your peak focus hours. Consider adding interleaving: switch between 2 related subjects within a deep session to strengthen cross-connections.",
-            "priority": 3})
-    
-    # Study streak tips
-    if study_streak == 0:
-        tips.append({"icon": "🔥", "category": "Start a Streak",
-            "tip": "**Study even 30 minutes today to start a streak.** Consistency > intensity. A 30-day streak of 3h/day beats sporadic 10h marathon sessions. The brain needs daily repetition to form neural pathways.",
-            "priority": 1})
-    elif study_streak >= 7:
-        tips.append({"icon": "🔥", "category": "Streak Power",
-            "tip": f"**{study_streak}-day streak! 🔥** You've built momentum. Now add 'Progressive Overload': increase daily hours by 15 minutes every week. Small increments compound into massive results.",
-            "priority": 3})
-    
-    # Productivity tips
-    if productivity_pct > 0:
-        if productivity_pct < 30:
-            tips.append({"icon": "📊", "category": "Productivity Boost",
-                "tip": f"**{productivity_pct:.0f}% productivity — room for growth.** Use the 'MIT Method': identify your 3 Most Important Tasks each morning. Complete those BEFORE anything else. Even finishing 2/3 MITs will double your output.",
-                "priority": 1})
-        elif productivity_pct > 60:
-            tips.append({"icon": "🏆", "category": "High Performer",
-                "tip": f"**{productivity_pct:.0f}% productivity — strong!** Now optimize quality: for every 2 hours of new learning, spend 30 min on revision. The 80/20 rule: 20% of topics account for 80% of exam marks — focus there.",
-                "priority": 3})
-    
-    # Work-life balance tips (if essential hours exist)
-    if essential_hours > 0:
-        tips.append({"icon": "⚖️", "category": "Work + Study Balance",
-            "tip": f"**You have {essential_hours:.0f}h of work/coaching.** Use 'Sandwich Technique': study 1h BEFORE work (peak brain), then 2-3h AFTER work. During lunch break, do 15-min flashcard revision. Commute = podcast/audio notes.",
-            "priority": 2})
-    
-    # Subject count tips
-    if subject_count > 5:
-        tips.append({"icon": "🔄", "category": "Subject Rotation",
-            "tip": f"**{subject_count} subjects — use a 3-day rotation.** Day 1: 3 subjects (2 hard + 1 easy). Day 2: next 3 subjects. Day 3: remaining + revision of Day 1. This ensures every subject gets attention weekly.",
-            "priority": 2})
-    
-    # ── CONTEXT-SPECIFIC TIPS ──
-    if context == "productivity":
-        tips.append({"icon": "📈", "category": "Energy Management",
-            "tip": "**Track energy, not just time.** Your brain has 2-3 peak hours/day (usually 9-11 AM or 2-4 PM). Use these for hardest subjects. Reserve low-energy slots for revision, notes, or current affairs.",
-            "priority": 2})
-        tips.append({"icon": "😴", "category": "Sleep = Memory",
-            "tip": "**7-8 hours sleep is non-negotiable.** During deep sleep, your brain consolidates everything studied that day. Cutting sleep to study more actually REDUCES what you retain. Sleep before midnight for best quality.",
-            "priority": 2})
-    
-    elif context == "target":
-        tips.append({"icon": "🎯", "category": "Target Acceleration",
-            "tip": "**Falling behind? Use 'Sprint Weeks.'** Pick the target closest to deadline, block 4-5h/day for just that subject for 5 days. Intense focused bursts are more effective than slow, scattered effort.",
-            "priority": 2})
-        tips.append({"icon": "✅", "category": "Micro-Goals",
-            "tip": "**Break each target into daily micro-goals.** Instead of 'Complete 10 chapters in 30 days,' set 'Finish Chapter 5, pages 45-80 today.' Specific = actionable = achievable.",
-            "priority": 2})
-    
-    elif context == "ask_esu":
-        tips.append({"icon": "🗞️", "category": "Current Affairs Strategy",
-            "tip": "**30 min daily: The Hindu/Indian Express.** Don't just read — link every news item to a GS paper. Environment → GS3, Policy → GS2, History connection → GS1. Make a 1-line note for each. Monthly compilation = revision-ready.",
-            "priority": 2})
-        tips.append({"icon": "✍️", "category": "Answer Writing",
-            "tip": "**Write 2 answers daily from Day 1.** Use UPSC structure: Intro (2 lines) → Body (points + examples) → Conclusion (way forward). Even bad answers improve fast with daily practice. Get them evaluated weekly.",
-            "priority": 2})
-    
-    # Always add core techniques
-    for i, t in enumerate(core_techniques):
-        t["priority"] = 4 + i  # Lower priority than data-driven tips
-        tips.append(t)
-    
-    # Sort by priority (lower = more relevant)
-    tips.sort(key=lambda x: x.get("priority", 99))
-    
-    return tips
+    if daily_df.empty:
+        return pd.DataFrame()
 
+    df = daily_df.copy()
+    df['date_obj'] = pd.to_datetime(df['date'])
+    
+    if period_type == 'Day':
+        df['Period'] = df['date_obj'].dt.strftime('%d %B %Y')
+        grouped = df
+    elif period_type == 'Week':
+        # Week range: Start Date - End Date
+        df['Period'] = df['date_obj'].apply(lambda x: f"{(x - timedelta(days=x.weekday())).strftime('%d %b %Y')} - {(x + timedelta(days=6 - x.weekday())).strftime('%d %b %Y')}")
+        grouped = df.groupby('Period')[['productive_hours', 'waste_hours']].sum().reset_index()
+    elif period_type == 'Month':
+        df['Period'] = df['date_obj'].dt.strftime('%B %Y')
+        grouped = df.groupby('Period')[['productive_hours', 'waste_hours']].sum().reset_index()
+    elif period_type == 'Year':
+        df['Period'] = df['date_obj'].dt.strftime('%Y')
+        grouped = df.groupby('Period')[['productive_hours', 'waste_hours']].sum().reset_index()
+    
+    sort_col = 'productive_hours' if category == 'productive' else 'waste_hours'
+    
+    top_10 = grouped.nlargest(10, sort_col)[['Period', sort_col]]
+    return top_10
 
-def render_smart_work_section(tips, max_tips=6):
+def get_top_streaks(daily_df, category):
     """
-    Returns HTML for rendering the smart work tips section in Streamlit.
-    Call with st.markdown(html, unsafe_allow_html=True)
-    
-    Args:
-        tips: List of tip dicts from generate_smart_work_tips()
-        max_tips: Max number of tips to show
+    Given a daily report dataframe, returns the top 10 streaks for productivity or waste.
     """
-    if not tips:
-        return ""
+    if daily_df.empty:
+        return pd.DataFrame()
+        
+    df = daily_df.sort_values('date').copy()
     
-    display_tips = tips[:max_tips]
+    if category == 'productive':
+        condition = df['productive_hours'] > 0
+    else:
+        condition = df['waste_hours'] > 0
+        
+    df['group'] = (~condition).cumsum()
     
-    # Convert markdown **bold** to HTML <strong> tags
-    import re as _re_sw
-    def _md_to_html(text):
-        return _re_sw.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', str(text))
+    streaks = df[condition]
+    if streaks.empty:
+        return pd.DataFrame()
+        
+    streak_counts = streaks.groupby('group').agg(
+        Start_Date=('date', 'min'),
+        End_Date=('date', 'max'),
+        Days=('date', 'count')
+    ).reset_index()
     
-    # Build cards HTML
-    cards_html = ""
-    for t in display_tips:
-        tip_html = _md_to_html(t['tip'])
-        cards_html += f"""
-        <div style="
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            border: 1px solid #334155; border-radius: 14px;
-            padding: 16px 20px; margin-bottom: 10px;
-            border-left: 4px solid #8b5cf6;
-        ">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-                <span style="font-size: 20px;">{t['icon']}</span>
-                <span style="font-size: 13px; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.5px;">
-                    {t['category']}
-                </span>
-            </div>
-            <div style="font-size: 14px; color: #e2e8f0; line-height: 1.6;">
-                {tip_html}
-            </div>
-        </div>
-        """
+    streak_counts['Start_Date'] = pd.to_datetime(streak_counts['Start_Date']).dt.strftime('%d %b %Y')
+    streak_counts['End_Date'] = pd.to_datetime(streak_counts['End_Date']).dt.strftime('%d %b %Y')
+    streak_counts['Period'] = streak_counts['Start_Date'] + " - " + streak_counts['End_Date']
     
-    html = f"""
-    <div style="
-        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a5f 100%);
-        padding: 20px 22px 10px 22px; border-radius: 16px;
-        border: 1px solid #4f46e5; margin: 20px 0;
-        box-shadow: 0 8px 32px rgba(79, 70, 229, 0.15);
-    ">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
-            <span style="font-size: 26px;">⚡</span>
-            <h3 style="margin: 0; color: #e0e7ff; font-weight: 800; letter-spacing: -0.3px;">Smart Work Tips</h3>
-            <span style="font-size: 12px; color: #818cf8; background: rgba(129,140,248,0.15); padding: 3px 10px; border-radius: 20px; font-weight: 600;">
-                Based on your data
-            </span>
-        </div>
-        {cards_html}
-    </div>
-    """
-    return html
+    top_10 = streak_counts.nlargest(10, 'Days')[['Period', 'Days']]
+    return top_10
 

@@ -175,7 +175,8 @@ if c is not None:
             subject TEXT,
             chapter TEXT,
             duration REAL,
-            amount REAL
+            amount REAL,
+            description TEXT
         )
         """)
 
@@ -326,6 +327,10 @@ if c is not None:
             c.execute("ALTER TABLE activities ADD COLUMN start_time TEXT")
         except Exception:
             pass
+        try:
+            c.execute("ALTER TABLE activities ADD COLUMN description TEXT")
+        except Exception:
+            pass
 
         c.execute("""
         CREATE TABLE IF NOT EXISTS system_notifications (
@@ -425,6 +430,16 @@ if c is not None:
             question TEXT,
             response TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS user_defaults (
+            username TEXT,
+            activity TEXT,
+            default_sub1 TEXT,
+            default_sub2 TEXT,
+            PRIMARY KEY (username, activity)
         )
         """)
 

@@ -128,13 +128,76 @@ st.markdown("""
         background-color: rgba(56, 189, 248, 0.1) !important;
         color: #38bdf8 !important;
     }
+
+    /* =========================================================
+       SIDEBAR VERTICAL PAGE BUTTON STYLING
+       Converts page navigation lists into tactile, highly-responsive buttons
+       ========================================================= */
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] div[role="radiogroup"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+        padding: 5px 0 !important;
+    }
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        position: relative !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        padding: 14px 20px !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        color: #cbd5e1 !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        cursor: pointer !important;
+        user-select: none !important;
+        touch-action: manipulation !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important; /* Centered horizontal alignment */
+        text-align: center !important;
+        -webkit-tap-highlight-color: transparent !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15), 0 2px 4px -2px rgba(0, 0, 0, 0.1) !important;
+    }
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
+        color: #60a5fa !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-color: rgba(96, 165, 250, 0.4) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2) !important;
+    }
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] label[data-checked="true"] {
+        background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%) !important;
+        color: white !important;
+        border-color: transparent !important;
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        transform: scale(1.02) !important;
+    }
+    /* Stretch the native invisible touch target to cover 100% of the sidebar label button */
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child { 
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        opacity: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        cursor: pointer !important;
+        z-index: 2 !important;
+    }
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] div[role="radiogroup"] > label > div:last-child {
+        position: relative !important;
+        z-index: 3 !important;
+        pointer-events: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
 # Sidebar Header: User Emoji, Username and Logout button below
 import database
-from database import get_fresh_cursor, reconnect, save_esu_response, get_esu_responses, delete_esu_response, ensure_connection
+from database import get_fresh_cursor, reconnect, save_esu_response, get_esu_responses, delete_esu_response, ensure_connection, get_ist_now
 import importlib
 import logic
 importlib.reload(logic)
@@ -201,6 +264,15 @@ def get_user_subjects(user):
         return study_subjects[:]
 
 
+def get_user_defaults(username):
+    """Retrieve saved default values for all activities for the user."""
+    try:
+        df = read_sql("SELECT activity, default_sub1, default_sub2 FROM user_defaults WHERE username=%s", (username,))
+        return {row['activity']: (row['default_sub1'] or "", row['default_sub2'] or "") for _, row in df.iterrows()}
+    except Exception:
+        return {}
+
+
 if conn is None:
     st.error("🚨 CRITICAL: PostgreSQL Database Connection Failed! Please ensure PostgreSQL is installed, running locally, and credentials match the .env configuration. The app cannot proceed without a database.")
     st.stop()
@@ -261,7 +333,7 @@ if st.sidebar.button("Logout", key="logout_btn", width='stretch'):
 st.sidebar.divider()
 
 menu_options = [
-    "Daily Entry","Calendar","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
+    "Daily Entry","Calendar","Study Calendar","Social Life","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
 ]
 # --- PERMISSIONS & CONFIG ---
 from database import get_user_config, update_user_config, get_allowed_recipients, set_allowed_recipients
@@ -672,6 +744,10 @@ menu = st.sidebar.radio(
 
 # Sync back to menu variable for the rest of the script
 menu = st.session_state.menu
+
+# --- Auto-Scroll to Top on Page Change ---
+if st.session_state.get("_prev_menu") != menu:
+    st.html("<script>window.parent.window.scrollTo(0,0);</script>", unsafe_allow_javascript=True)
 
 # Auto-select configured default song when first entering MyLove Special
 if menu == "MyLove Special":
@@ -1512,12 +1588,95 @@ if menu == "Daily Entry":
 
     date = st.date_input("Date")
 
-    tab_act, tab_sleep = st.tabs(["📝 Log Activities", "🌙 Sleep & Wake Log"])
+    # Persistent Tab Navigation
+    st.markdown("""
+        <style>
+        /* Container for radio to look like tabs - Scoped specifically to Daily Entry */
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) > div {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            padding: 6px !important;
+            border-radius: 14px !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            gap: 10px !important;
+            margin-bottom: 20px !important;
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            width: 100% !important;
+            justify-content: space-between !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            -ms-overflow-style: none !important;  /* IE and Edge */
+            scrollbar-width: none !important;  /* Firefox */
+        }
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) > div::-webkit-scrollbar {
+            display: none !important;
+        }
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) label {
+            position: relative !important;
+            background: transparent !important;
+            padding: 12px 24px !important;
+            border-radius: 10px !important;
+            transition: all 0.2s ease-in-out !important;
+            color: #94a3b8 !important;
+            font-weight: 600 !important;
+            border: none !important;
+            cursor: pointer !important;
+            user-select: none !important;
+            touch-action: manipulation !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            flex: 1 1 0% !important; /* Equal distribution for huge touch targets */
+            text-align: center !important;
+            -webkit-tap-highlight-color: transparent !important;
+            white-space: nowrap !important; /* Force text to remain strictly horizontal */
+        }
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) label:hover {
+            color: #60a5fa !important;
+            background: rgba(96, 165, 250, 0.08) !important;
+        }
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) label[data-checked="true"] {
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%) !important;
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+        }
+        /* Hide the radio group main label */
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) div[data-testid="stWidgetLabel"] { 
+            display: none !important; 
+        }
+        /* Stretch the native touch target to cover the entire label bounding box for instant mobile response */
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) div[role="radiogroup"] > label > div:first-child { 
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            opacity: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            cursor: pointer !important;
+            z-index: 2 !important;
+        }
+        /* Keep text above the absolute overlay so it remains readable and crisp */
+        div[data-testid="stRadio"]:has(input[id*="daily_tab_persist"]) div[role="radiogroup"] > label > div:last-child {
+            position: relative !important;
+            z-index: 3 !important;
+            pointer-events: none !important;
+            white-space: nowrap !important; /* Force text strictly horizontal */
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    selected_tab = st.radio("Tab Selection", ["📝 Log Activities", "🌙 Sleep & Wake Log", "⚙️ Manage Defaults"], 
+                            horizontal=True, label_visibility="collapsed", key="daily_tab_persist")
 
-    with tab_act:
+    if selected_tab == "📝 Log Activities":
+        _user_defaults = get_user_defaults(USER)
         base_activities = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Food", "Transport",
             "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
             "Turf", "Travelling", "Powernap"
         ]
@@ -1584,86 +1743,228 @@ if menu == "Daily Entry":
         sub1 = sub2 = ""
         if activity in _SUBJ_ACTS:
             _user_subjs = get_user_subjects(USER)
-            _subj_col, _subj_del_col = st.columns([3, 1])
-            with _subj_col:
-                sub1 = st.selectbox("Subject", _user_subjs + ["+ Add New"], key="de_subject_sel")
-            with _subj_del_col:
-                if sub1 in _user_subjs:
-                    if st.button("🗑️", key=f"del_subj_{sub1}"):
-                        st.session_state[f"confirm_del_subj_{sub1}"] = True
-                if sub1 in _user_subjs and st.session_state.get(f"confirm_del_subj_{sub1}", False):
-                    st.markdown(f"⚠️ Delete **{sub1}**?")
-                    _yc, _nc = st.columns([1, 1])
-                    with _yc:
-                        if st.button("✅ Yes", key=f"yes_del_subj_{sub1}"):
-                            c.execute("DELETE FROM user_subjects WHERE username=%s AND subject=%s", (USER, sub1))
-                            conn.commit()
-                            st.session_state[f"confirm_del_subj_{sub1}"] = False
-                            st.toast(f"🗑️ Subject '{sub1}' deleted.", icon="🗑️")
-                            st.rerun()
-                    with _nc:
-                        if st.button("❌ No", key=f"no_del_subj_{sub1}"):
-                            st.session_state[f"confirm_del_subj_{sub1}"] = False
-                            st.rerun()
             
-            if sub1 == "+ Add New":
-                _new_subj_col, _ = st.columns([3, 1])
-                with _new_subj_col:
-                    _new_subj = st.text_input("Subject Name", key="de_new_subj")
-                    if st.button("➕ Add Subject", key="de_add_subj_btn"):
-                        _ns = _new_subj.strip()
-                        if _ns:
-                            c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, _ns))
-                            conn.commit()
-                            st.toast(f"✅ Subject '{_ns}' added!", icon="✅")
-                            import time; time.sleep(1)
-                            st.rerun()
+            # Ensure "Current Affairs" exists in user_subjects
+            if "Current Affairs" not in _user_subjs:
+                try:
+                    c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, "Current Affairs"))
+                    conn.commit()
+                    _user_subjs = get_user_subjects(USER)
+                except Exception:
+                    pass
+
+            if activity == "Study":
+                # Find default study mode
+                _def_sub1, _def_sub2 = _user_defaults.get("Study", ("", ""))
+                _def_mode_idx = 1 if _def_sub1 == "Current Affairs" else 0
+                
+                _study_mode = st.radio("Study Mode", ["Static GS Syllabus", "Current Affairs"], index=_def_mode_idx, horizontal=True, key="de_study_mode")
+                if _study_mode == "Current Affairs":
+                    sub1 = "Current Affairs"
+                    
+                    # Find default CA source
+                    _ca_options = ["Newspaper (The Hindu / Indian Express)", "Monthly Compilation", "PIB / PRS / Yojana", "Editorial Analysis", "Custom Topic"]
+                    _def_ca_idx = 0
+                    if _def_sub2 in _ca_options:
+                        _def_ca_idx = _ca_options.index(_def_sub2)
+                    elif _def_sub2:
+                        _def_ca_idx = 4 # Default to custom topic if some value exists but not in pre-filled list
+                        
+                    _ca_source = st.selectbox("Source / Topic", _ca_options, index=_def_ca_idx, key="de_ca_source")
+                    if _ca_source == "Custom Topic":
+                        _custom_val = _def_sub2 if _def_sub2 not in _ca_options[:-1] else ""
+                        sub2 = st.text_input("Custom Topic Name", value=_custom_val, placeholder="e.g. G20 Summit, DPI", key="de_ca_custom_topic")
+                    else:
+                        sub2 = _ca_source
+                else:
+                    # Static GS Syllabus - show standard subject selector (excluding Current Affairs to avoid confusion)
+                    _static_subjs = [s for s in _user_subjs if s != "Current Affairs"]
+                    _subj_col, _subj_del_col = st.columns([3, 1])
+                    with _subj_col:
+                        _def_subj_idx = 0
+                        if _def_sub1 in _static_subjs:
+                            _def_subj_idx = _static_subjs.index(_def_sub1)
+                        sub1 = st.selectbox("Subject", _static_subjs + ["+ Add New"], index=_def_subj_idx, key="de_subject_sel")
+                    with _subj_del_col:
+                        if sub1 in _user_subjs:
+                            if st.button("🗑️", key=f"del_subj_{sub1}"):
+                                st.session_state[f"confirm_del_subj_{sub1}"] = True
+                        if sub1 in _user_subjs and st.session_state.get(f"confirm_del_subj_{sub1}", False):
+                            st.markdown(f"⚠️ Delete **{sub1}**?")
+                            _yc, _nc = st.columns([1, 1])
+                            with _yc:
+                                if st.button("✅ Yes", key=f"yes_del_subj_{sub1}"):
+                                    c.execute("DELETE FROM user_subjects WHERE username=%s AND subject=%s", (USER, sub1))
+                                    conn.commit()
+                                    st.session_state[f"confirm_del_subj_{sub1}"] = False
+                                    st.toast(f"🗑️ Subject '{sub1}' deleted.", icon="🗑️")
+                                    st.rerun()
+                            with _nc:
+                                if st.button("❌ No", key=f"no_del_subj_{sub1}"):
+                                    st.session_state[f"confirm_del_subj_{sub1}"] = False
+                                    st.rerun()
+                    
+                    if sub1 == "+ Add New":
+                        _new_subj_col, _ = st.columns([3, 1])
+                        with _new_subj_col:
+                            _new_subj = st.text_input("Subject Name", key="de_new_subj")
+                            if st.button("➕ Add Subject", key="de_add_subj_btn"):
+                                _ns = _new_subj.strip()
+                                if _ns:
+                                    c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, _ns))
+                                    conn.commit()
+                                    st.toast(f"✅ Subject '{_ns}' added!", icon="✅")
+                                    import time; time.sleep(1)
+                                    st.rerun()
+            else:
+                # Other subject-based activities: Revision, Answer Writing, Practice
+                _def_sub1, _def_sub2 = _user_defaults.get(activity, ("", ""))
+                _def_subj_idx = 0
+                if _def_sub1 in _user_subjs:
+                    _def_subj_idx = _user_subjs.index(_def_sub1)
+                _subj_col, _subj_del_col = st.columns([3, 1])
+                with _subj_col:
+                    sub1 = st.selectbox("Subject", _user_subjs + ["+ Add New"], index=_def_subj_idx, key="de_subject_sel")
+                with _subj_del_col:
+                    if sub1 in _user_subjs:
+                        if st.button("🗑️", key=f"del_subj_{sub1}"):
+                            st.session_state[f"confirm_del_subj_{sub1}"] = True
+                    if sub1 in _user_subjs and st.session_state.get(f"confirm_del_subj_{sub1}", False):
+                        st.markdown(f"⚠️ Delete **{sub1}**?")
+                        _yc, _nc = st.columns([1, 1])
+                        with _yc:
+                            if st.button("✅ Yes", key=f"yes_del_subj_{sub1}"):
+                                c.execute("DELETE FROM user_subjects WHERE username=%s AND subject=%s", (USER, sub1))
+                                conn.commit()
+                                st.session_state[f"confirm_del_subj_{sub1}"] = False
+                                st.toast(f"🗑️ Subject '{sub1}' deleted.", icon="🗑️")
+                                st.rerun()
+                        with _nc:
+                            if st.button("❌ No", key=f"no_del_subj_{sub1}"):
+                                st.session_state[f"confirm_del_subj_{sub1}"] = False
+                                st.rerun()
+                
+                if sub1 == "+ Add New":
+                    _new_subj_col, _ = st.columns([3, 1])
+                    with _new_subj_col:
+                        _new_subj = st.text_input("Subject Name", key="de_new_subj")
+                        if st.button("➕ Add Subject", key="de_add_subj_btn"):
+                            _ns = _new_subj.strip()
+                            if _ns:
+                                c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, _ns))
+                                conn.commit()
+                                st.toast(f"✅ Subject '{_ns}' added!", icon="✅")
+                                import time; time.sleep(1)
+                                st.rerun()
 
         # Activity specific fields
         if activity == "Study":
-            sub2 = st.text_input("Chapter / Topic", max_chars=50, placeholder="Enter chapter/topic...")
+            if "de_study_mode" in st.session_state and st.session_state["de_study_mode"] == "Current Affairs":
+                pass
+            else:
+                _def_sub1, _def_sub2 = _user_defaults.get("Study", ("", ""))
+                _def_ch = _def_sub2 if _def_sub1 != "Current Affairs" else ""
+                sub2 = st.text_input("Chapter / Topic", value=_def_ch, max_chars=50, placeholder="Enter chapter/topic...", key="de_study_static_ch")
         elif activity == "Revision":
-            sub2 = st.text_input("Chapter/Pages Revised", key="de_rev_ch")
+            _def_sub1, _def_sub2 = _user_defaults.get("Revision", ("", ""))
+            sub2 = st.text_input("Chapter/Pages Revised", value=_def_sub2, key="de_rev_ch")
         elif activity == "Book Reading":
-            sub1 = st.text_input("Book Title", key="de_book_title")
-            sub2 = st.text_input("Chapters/Pages", key="de_book_detail")
+            _def_sub1, _def_sub2 = _user_defaults.get("Book Reading", ("", ""))
+            sub1 = st.text_input("Book Title", value=_def_sub1, key="de_book_title")
+            sub2 = st.text_input("Chapters/Pages", value=_def_sub2, key="de_book_detail")
         elif activity in ["Answer Writing", "Practice"]:
-            _q_solved = st.number_input("Questions Solved", min_value=0, step=1, key=f"de_q_{activity}")
+            _def_sub1, _def_sub2 = _user_defaults.get(activity, ("", ""))
+            _def_q = 0
+            if _def_sub2 and _def_sub2.startswith("Q:"):
+                try:
+                    _def_q = int(_def_sub2.split(":")[1])
+                except:
+                    pass
+            _q_solved = st.number_input("Questions Solved", min_value=0, value=_def_q, step=1, key=f"de_q_{activity}")
             sub2 = f"Q:{int(_q_solved)}" if _q_solved > 0 else ""
         elif activity == "Test":
-            sub1 = st.selectbox("Test Type", test_types)
-            sub2 = st.text_input("#Questions")
+            _def_sub1, _def_sub2 = _user_defaults.get("Test", ("", ""))
+            _def_test_idx = 0
+            if _def_sub1 in test_types:
+                _def_test_idx = test_types.index(_def_sub1)
+            sub1 = st.selectbox("Test Type", test_types, index=_def_test_idx)
+            if sub1 == "D-Day Exam":
+                sub2 = ""
+            else:
+                sub2 = st.text_input("#Questions", value=_def_sub2)
         elif activity == "Office":
-            sub1 = st.text_input("Work Notes", key="de_office_notes")
+            _def_sub1, _def_sub2 = _user_defaults.get("Office", ("", ""))
+            sub1 = st.text_input("Work Notes", value=_def_sub1, key="de_office_notes")
         elif activity == "Coaching":
-            sub1 = st.text_input("Subject", key="de_coaching_topic")
-            sub2 = st.text_input("Notes", key="de_coaching_notes")
+            _def_sub1, _def_sub2 = _user_defaults.get("Coaching", ("", ""))
+            sub1 = st.text_input("Subject", value=_def_sub1, key="de_coaching_topic")
+            sub2 = st.text_input("Notes", value=_def_sub2, key="de_coaching_notes")
         elif activity == "WFH":
-            sub1 = st.text_input("Work Notes", key="de_wfh_notes")
+            _def_sub1, _def_sub2 = _user_defaults.get("WFH", ("", ""))
+            sub1 = st.text_input("Work Notes", value=_def_sub1, key="de_wfh_notes")
         elif activity == "Entertainment":
-            sub1 = st.selectbox("Type", ent_types)
-            if sub1 == "Movie": sub2 = st.selectbox("Mode", movie_modes)
+            _def_sub1, _def_sub2 = _user_defaults.get("Entertainment", ("", ""))
+            _def_ent_idx = 0
+            if _def_sub1 in ent_types:
+                _def_ent_idx = ent_types.index(_def_sub1)
+            sub1 = st.selectbox("Type", ent_types, index=_def_ent_idx)
+            if sub1 == "Movie":
+                _def_mode_idx = 0
+                if _def_sub2 in movie_modes:
+                    _def_mode_idx = movie_modes.index(_def_sub2)
+                sub2 = st.selectbox("Mode", movie_modes, index=_def_mode_idx)
         elif activity == "Social Media":
-            sub1 = st.selectbox("Platform", social_platform)
-            sub2 = st.selectbox("Content", content_type)
+            _def_sub1, _def_sub2 = _user_defaults.get("Social Media", ("", ""))
+            _def_plat_idx = 0
+            if _def_sub1 in social_platform:
+                _def_plat_idx = social_platform.index(_def_sub1)
+            _def_cont_idx = 0
+            if _def_sub2 in content_type:
+                _def_cont_idx = content_type.index(_def_sub2)
+            sub1 = st.selectbox("Platform", social_platform, index=_def_plat_idx)
+            sub2 = st.selectbox("Content", content_type, index=_def_cont_idx)
+        elif activity == "TalkOnCall":
+            _def_sub1, _def_sub2 = _user_defaults.get("TalkOnCall", ("", ""))
+            _def_whom_idx = 0
+            if _def_sub1 in talkoncall_withwhom:
+                _def_whom_idx = talkoncall_withwhom.index(_def_sub1)
+            sub1 = st.selectbox("With Whom", talkoncall_withwhom, index=_def_whom_idx)
+            sub2 = st.text_input("Topic / Notes", value=_def_sub2, key="de_talk_notes")
         elif activity == "Food":
-            sub1 = st.selectbox("Source", food_sources)
+            _def_sub1, _def_sub2 = _user_defaults.get("Food", ("", ""))
+            _def_food_idx = 0
+            if _def_sub1 in food_sources:
+                _def_food_idx = food_sources.index(_def_sub1)
+            sub1 = st.selectbox("Source", food_sources, index=_def_food_idx)
         elif activity == "Transport":
-            sub1 = st.selectbox("Service", transport_services)
+            _def_sub1, _def_sub2 = _user_defaults.get("Transport", ("", ""))
+            _def_trans_idx = 0
+            if _def_sub1 in transport_services:
+                _def_trans_idx = transport_services.index(_def_sub1)
+            sub1 = st.selectbox("Service", transport_services, index=_def_trans_idx)
         elif activity == "WentOutside":
-            sub1 = st.text_input("Location", key="de_went_outside")
+            _def_sub1, _def_sub2 = _user_defaults.get("WentOutside", ("", ""))
+            sub1 = st.text_input("Location", value=_def_sub1, key="de_went_outside")
         elif activity == "Turf":
-            sub1 = st.text_input("Sport", key="de_turf_sport")
-            sub2 = st.text_input("Details", key="de_turf_detail")
+            _def_sub1, _def_sub2 = _user_defaults.get("Turf", ("", ""))
+            sub1 = st.text_input("Sport", value=_def_sub1, key="de_turf_sport")
+            sub2 = st.text_input("Details", value=_def_sub2, key="de_turf_detail")
         elif activity == "Travelling":
-            sub1 = st.selectbox("Mode", ["✈️ Flight", "🚂 Railway", "🚗 Other"], key="de_travel_mode")
-            sub2 = st.text_input("Destination", key="de_travel_dest")
+            _def_sub1, _def_sub2 = _user_defaults.get("Travelling", ("", ""))
+            _travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
+            _def_travel_idx = 2
+            if _def_sub1 in _travel_modes:
+                _def_travel_idx = _travel_modes.index(_def_sub1)
+            sub1 = st.selectbox("Mode", _travel_modes, index=_def_travel_idx, key="de_travel_mode")
+            sub2 = st.text_input("Destination", value=_def_sub2, key="de_travel_dest")
 
         _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test"]
         _track_by_expense = activity in ["Food", "Transport"]
         if activity in custom:
             _track_both = (custom_track_map.get(activity) == "Expense (₹)")
             _track_by_expense = False
+
+        description = st.text_input("📝 Description (Optional)", key=f"de_desc_{activity}")
 
         _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=1, horizontal=True, key=f"de_dur_mode_{activity}")
         
@@ -1710,14 +2011,13 @@ if menu == "Daily Entry":
                     else: duration = (t_mins - f_mins) / 60
                     st.caption(f"Duration: **{duration:.1f} hours**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
             if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0, key=f"de_amt_tr_{activity}")
-
         if st.button("💾 Save Activity", key="save_main_activity"):
             if duration > 0 or amount > 0:
                 if is_midnight_crossing:
-                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration_today, amount, USER, f"{from_h}:{from_m:02d}"))
-                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}"))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration_today, amount, USER, f"{from_h}:{from_m:02d}", description))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}", description))
                 else:
-                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration, amount, USER, start_time))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration, amount, USER, start_time, description))
                 conn.commit()
                 if activity.strip().lower() == "powernap":
                     try:
@@ -1734,7 +2034,7 @@ if menu == "Daily Entry":
 
         st.divider()
         st.markdown("### 📋 Activities Logged")
-        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time FROM activities WHERE date=%s AND username=%s ORDER BY id", (str(date), USER))
+        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time, description FROM activities WHERE date=%s AND username=%s ORDER BY id", (str(date), USER))
         if _today_df.empty: st.caption("No activities logged for this date.")
         else:
             for _, _row in _today_df.iterrows():
@@ -1748,7 +2048,13 @@ if menu == "Daily Entry":
                 val = f"{_row['duration']}h" if _row['duration'] > 0 else (f"₹{_row['amount']}" if _row['amount'] > 0 else "")
                 if val: parts.append(val)
                 l, r = st.columns([5, 1])
-                l.markdown(f"• **{' | '.join(parts)}**")
+                
+                raw_desc = _row.get('description')
+                desc_text = ""
+                if raw_desc and str(raw_desc).strip() and str(raw_desc).strip().lower() not in ('none', 'nan', 'null'):
+                    desc_text = f"<br><span style='font-size:12px; color:#94a3b8;'>{str(raw_desc).strip()}</span>"
+                l.markdown(f"• **{' | '.join(parts)}**{desc_text}", unsafe_allow_html=True)
+                
                 if r.button("🗑️", key=f"del_daily_{rid}"):
                     st.session_state[f"confirm_daily_del_{rid}"] = True
                 
@@ -1766,7 +2072,7 @@ if menu == "Daily Entry":
                             st.session_state[f"confirm_daily_del_{rid}"] = False
                             st.rerun()
 
-    with tab_sleep:
+    elif selected_tab == "🌙 Sleep & Wake Log":
         st.markdown("""
         <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #2563eb; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
             <div style="font-size:17px; font-weight:700; color:#60a5fa; margin-bottom:10px;">🌙 Sleep & Wake Log</div>
@@ -1830,6 +2136,180 @@ if menu == "Daily Entry":
                     import time; time.sleep(1); st.rerun()
                 else: st.warning("Enter sleep time.")
 
+    elif selected_tab == "⚙️ Manage Defaults":
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #2563eb; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
+            <div style="font-size:17px; font-weight:700; color:#60a5fa; margin-bottom:4px;">⚙️ Manage Activity Defaults</div>
+            <div style="font-size:13px; color:#94a3b8;">Set default subactivities, subjects, or notes for each activity type to auto-fill them during log entry and save time.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        _base_acts = [
+            "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
+            "Entertainment", "Social Media", "TalkOnCall", "Food", "Transport",
+            "Office", "WFH", "Coaching", "WentOutside", "Turf", "Travelling"
+        ]
+        # Query custom activities
+        _custom_acts_df = read_sql("SELECT name FROM custom_boxes WHERE username=%s", (USER,))
+        _custom_acts = _custom_acts_df['name'].tolist() if not _custom_acts_df.empty else []
+        
+        all_config_acts = _base_acts + _custom_acts
+        
+        # Load existing defaults
+        _current_defaults = get_user_defaults(USER)
+        
+        selected_config_act = st.selectbox("Select Activity to Configure", all_config_acts, key="cfg_act_sel")
+        
+        # Display inputs based on selected activity
+        def_sub1_val, def_sub2_val = _current_defaults.get(selected_config_act, ("", ""))
+        
+        new_def_sub1 = ""
+        new_def_sub2 = ""
+        
+        st.markdown(f"### Configure **{selected_config_act}** Defaults")
+        
+        if selected_config_act == "Study":
+            _study_mode = st.radio("Default Study Mode", ["Static GS Syllabus", "Current Affairs"], 
+                                   index=1 if def_sub1_val == "Current Affairs" else 0, horizontal=True, key="cfg_study_mode")
+            if _study_mode == "Current Affairs":
+                new_def_sub1 = "Current Affairs"
+                _ca_options = ["Newspaper (The Hindu / Indian Express)", "Monthly Compilation", "PIB / PRS / Yojana", "Editorial Analysis", "Custom Topic"]
+                _def_ca_idx = 0
+                if def_sub2_val in _ca_options:
+                    _def_ca_idx = _ca_options.index(def_sub2_val)
+                elif def_sub2_val:
+                    _def_ca_idx = 4
+                _ca_source = st.selectbox("Default Source", _ca_options, index=_def_ca_idx, key="cfg_ca_source")
+                if _ca_source == "Custom Topic":
+                    _custom_val = def_sub2_val if def_sub2_val not in _ca_options[:-1] else ""
+                    new_def_sub2 = st.text_input("Default Custom Topic Name", value=_custom_val, key="cfg_ca_custom_topic")
+                else:
+                    new_def_sub2 = _ca_source
+            else:
+                _user_subjs = get_user_subjects(USER)
+                _static_subjs = [s for s in _user_subjs if s != "Current Affairs"]
+                _def_subj_idx = 0
+                if def_sub1_val in _static_subjs:
+                    _def_subj_idx = _static_subjs.index(def_sub1_val)
+                new_def_sub1 = st.selectbox("Default Subject", _static_subjs, index=_def_subj_idx if _static_subjs else 0, key="cfg_subject_sel")
+                
+                # pre-fill default chapter/topic
+                _def_ch = def_sub2_val if def_sub1_val != "Current Affairs" else ""
+                new_def_sub2 = st.text_input("Default Chapter / Topic", value=_def_ch, placeholder="e.g. Fundamental Rights", key="cfg_study_ch")
+                
+        elif selected_config_act in ["Revision", "Answer Writing", "Practice"]:
+            _user_subjs = get_user_subjects(USER)
+            _def_subj_idx = 0
+            if def_sub1_val in _user_subjs:
+                _def_subj_idx = _user_subjs.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Subject", _user_subjs, index=_def_subj_idx if _user_subjs else 0, key="cfg_subject_sel")
+            
+            if selected_config_act == "Revision":
+                new_def_sub2 = st.text_input("Default Chapter/Pages Revised", value=def_sub2_val, key="cfg_rev_ch")
+            elif selected_config_act in ["Answer Writing", "Practice"]:
+                _def_q = 0
+                if def_sub2_val and def_sub2_val.startswith("Q:"):
+                    try:
+                        _def_q = int(def_sub2_val.split(":")[1])
+                    except:
+                        pass
+                _q_solved = st.number_input("Default Questions Solved", min_value=0, value=_def_q, step=1, key="cfg_q_solved")
+                new_def_sub2 = f"Q:{int(_q_solved)}" if _q_solved > 0 else ""
+                
+        elif selected_config_act == "Book Reading":
+            new_def_sub1 = st.text_input("Default Book Title", value=def_sub1_val, key="cfg_book_title")
+            new_def_sub2 = st.text_input("Default Chapters/Pages", value=def_sub2_val, key="cfg_book_detail")
+            
+        elif selected_config_act == "Social Media":
+            _plat_idx = 0
+            if def_sub1_val in social_platform:
+                _plat_idx = social_platform.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Platform", social_platform, index=_plat_idx, key="cfg_sm_platform")
+            
+            _cont_idx = 0
+            if def_sub2_val in content_type:
+                _cont_idx = content_type.index(def_sub2_val)
+            new_def_sub2 = st.selectbox("Default Content Type", content_type, index=_cont_idx, key="cfg_sm_content")
+            
+        elif selected_config_act == "TalkOnCall":
+            _whom_idx = 0
+            if def_sub1_val in talkoncall_withwhom:
+                _whom_idx = talkoncall_withwhom.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default With Whom", talkoncall_withwhom, index=_whom_idx, key="cfg_talk_whom")
+            new_def_sub2 = st.text_input("Default Topic / Notes", value=def_sub2_val, key="cfg_talk_notes")
+            
+        elif selected_config_act == "Entertainment":
+            _ent_idx = 0
+            if def_sub1_val in ent_types:
+                _ent_idx = ent_types.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Entertainment Type", ent_types, index=_ent_idx, key="cfg_ent_type")
+            if new_def_sub1 == "Movie":
+                _mode_idx = 0
+                if def_sub2_val in movie_modes:
+                    _mode_idx = movie_modes.index(def_sub2_val)
+                new_def_sub2 = st.selectbox("Default Movie Mode", movie_modes, index=_mode_idx, key="cfg_movie_mode")
+                
+        elif selected_config_act == "Food":
+            _food_idx = 0
+            if def_sub1_val in food_sources:
+                _food_idx = food_sources.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Food Source", food_sources, index=_food_idx, key="cfg_food_src")
+            
+        elif selected_config_act == "Transport":
+            _trans_idx = 0
+            if def_sub1_val in transport_services:
+                _trans_idx = transport_services.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Service", transport_services, index=_trans_idx, key="cfg_trans_srv")
+            
+        elif selected_config_act == "Travelling":
+            _travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
+            _travel_idx = 2
+            if def_sub1_val in _travel_modes:
+                _travel_idx = _travel_modes.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Travel Mode", _travel_modes, index=_travel_idx, key="cfg_travel_mode")
+            new_def_sub2 = st.text_input("Default Destination", value=def_sub2_val, key="cfg_travel_dest")
+            
+        elif selected_config_act == "Turf":
+            new_def_sub1 = st.text_input("Default Sport", value=def_sub1_val, key="cfg_turf_sport")
+            new_def_sub2 = st.text_input("Default Details", value=def_sub2_val, key="cfg_turf_detail")
+            
+        else:
+            # Custom/Default general activities (Office, WFH, Coaching, WentOutside, Custom activities, etc.)
+            new_def_sub1 = st.text_input("Default Detail 1 (e.g. Location, Subject, Notes)", value=def_sub1_val, key="cfg_custom_sub1")
+            new_def_sub2 = st.text_input("Default Detail 2 (e.g. Details, Notes)", value=def_sub2_val, key="cfg_custom_sub2")
+
+        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+        if st.button("💾 Save Activity Defaults", use_container_width=True, key="save_cfg_defaults"):
+            try:
+                c.execute("""
+                    INSERT INTO user_defaults (username, activity, default_sub1, default_sub2)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username, activity) DO UPDATE SET
+                        default_sub1 = EXCLUDED.default_sub1,
+                        default_sub2 = EXCLUDED.default_sub2
+                """, (USER, selected_config_act, new_def_sub1, new_def_sub2))
+                conn.commit()
+                st.toast(f"✅ Defaults for **{selected_config_act}** saved successfully!", icon="✅")
+                import time; time.sleep(1)
+                st.rerun()
+            except Exception as ex:
+                st.error(f"Error saving defaults: {ex}")
+
+    # ── SMART WORK TIPS (Daily Entry Page) ──
+    _de_df_all = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    if not _de_df_all.empty:
+        _de_prod = _de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
+        _de_waste = _de_df_all[~_de_df_all['type'].isin(PRODUCTIVE_TYPES + ESSENTIAL_TYPES + NEUTRAL_TYPES)]['duration'].sum()
+        _de_ess = _de_df_all[_de_df_all['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
+        _de_tips = generate_smart_work_tips(
+            prod_hours=_de_prod, waste_hours=_de_waste, essential_hours=_de_ess,
+            study_streak=streak(_de_df_all), focus_pct=focus_score(_de_df_all),
+            subject_count=len(_de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['subject'].unique()) if not _de_df_all.empty else 0,
+            productivity_pct=0, context="general"
+        )
+        with st.expander("⚡ Smart Work Tips & UPSC Strategies", expanded=False):
+            st.markdown(render_smart_work_section(_de_tips, max_tips=12), unsafe_allow_html=True)
+
 # ---------------- CALENDAR ----------------
 elif menu == "Calendar":
     st.title("📆 Calendars")
@@ -1840,7 +2320,7 @@ elif menu == "Calendar":
         import calendar as calmod
         import datetime
         
-        today = datetime.date.today()
+        today = get_ist_now().date()
         
         # Month/Year selection controls - single row
         col1, col2 = st.columns([1, 1])
@@ -2286,6 +2766,733 @@ elif menu == "Calendar":
         html += "</div>"    
         st.markdown(html, unsafe_allow_html=True)
 
+# ---------------- SOCIAL LIFE ----------------
+elif menu == "Social Life":
+    st.title("🌟 Social Life")
+    
+    import calendar as calmod
+    import datetime
+    
+    today = get_ist_now().date()
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        selected_year = st.number_input("Year", value=today.year, min_value=2020, max_value=2100, key="sm_cal_yr", step=1)
+    with col2:
+        selected_month = st.number_input("Month", value=today.month, min_value=1, max_value=12, key="sm_cal_mo", step=1)
+    
+    df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    if not df.empty:
+        if 'start_time' not in df.columns: df['start_time'] = None
+        df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
+        df['chapter'] = df['chapter'].apply(get_clean_chapter)
+    
+    # Filter specific activities
+    # WentOutside, Turf, Travelling, Office, Coaching, Test (D-Day Exam)
+    sm_df = df[
+        (df['type'].isin(['WentOutside', 'Turf', 'Travelling', 'Office', 'Coaching'])) |
+        ((df['type'] == 'Test') & (df['subject'] == 'D-Day Exam'))
+    ].copy() if not df.empty else pd.DataFrame()
+    
+    daily_sm = {}
+    if not sm_df.empty:
+        for d, g in sm_df.groupby("date"):
+            daily_sm[str(d)] = g.to_dict('records')
+            
+    month_name = calmod.month_name[int(selected_month)]
+    st.subheader(f"{month_name} {int(selected_year)}")
+    
+    cal = calmod.Calendar(firstweekday=0)
+    month_days = cal.monthdayscalendar(int(selected_year), int(selected_month))
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    
+    _, num_days = calmod.monthrange(int(selected_year), int(selected_month))
+    first_weekday = calmod.weekday(int(selected_year), int(selected_month), 1)
+    
+    html = """
+    <style>
+    .sm-cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 10px;
+        margin: 15px 0 0 0;
+    }
+    .sm-cal-header {
+        font-weight: 900;
+        font-size: 15px;
+        text-align: center;
+        padding: 14px 8px;
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        color: #e0e7ff;
+        border-radius: 8px;
+        border: 2px solid #475569;
+        letter-spacing: 0.5px;
+    }
+    .sm-cal-cell {
+        border: 2px solid #475569;
+        border-radius: 12px;
+        padding: 12px 10px;
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+        font-size: 12px;
+        transition: all 0.25s ease, transform 0.2s ease;
+        cursor: pointer;
+        gap: 4px;
+        overflow: hidden;
+    }
+    .sm-cal-cell:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+    }
+    .sm-cal-cell.empty {
+        background: transparent !important;
+        border: none !important;
+        cursor: default;
+        min-height: auto;
+    }
+    .sm-cal-cell.empty:hover {
+        transform: none;
+        box-shadow: none;
+        border-color: transparent;
+    }
+    .sm-cal-date {
+        font-weight: 900;
+        font-size: 22px;
+        margin-bottom: 2px;
+        line-height: 1;
+    }
+    .sm-act-tag {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 5px;
+        border-radius: 4px;
+        margin-bottom: 2px;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .sm-desc {
+        font-size: 10px;
+        margin-top: 2px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* Tablet */
+    @media (max-width: 900px) {
+        .sm-cal-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .sm-cal-header { font-size: 13px; padding: 10px 6px; }
+        .sm-cal-cell { min-height: 120px; padding: 10px 8px; }
+        .sm-cal-date { font-size: 19px; }
+        .sm-act-tag { font-size: 10px; }
+    }
+    /* Mobile */
+    @media (max-width: 550px) {
+        .sm-cal-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .sm-cal-header { font-size: 12px; padding: 8px 4px; }
+        .sm-cal-cell { min-height: 100px; padding: 8px 6px; }
+        .sm-cal-date { font-size: 16px; }
+        .sm-act-tag { font-size: 9px; }
+    }
+    </style>
+    <div class="sm-cal-grid">
+    """
+    
+    for day in day_names:
+        html += f"<div class='sm-cal-header'>{day}</div>"
+        
+    for _ in range(first_weekday):
+        html += "<div class='sm-cal-cell empty'></div>"
+        
+    today_str = str(today)
+    
+    # Color priority for cell background (first match wins)
+    _SM_COLOR_PRIORITY = {
+        'WentOutside': ('#fbbf24', '#000000'),   # Golden Yellow
+        'Travelling':  ('#fbbf24', '#000000'),   # Golden Yellow
+        'Test':        ('#fbbf24', '#000000'),   # Golden Yellow (D-Day Exam)
+        'Turf':        ('#dc2626', '#ffffff'),   # Red
+        'Office':      ('#ec4899', '#ffffff'),   # Pink
+        'Coaching':    ('#22c55e', '#000000'),   # Green
+    }
+    
+    for day in range(1, num_days + 1):
+        date_str = f"{int(selected_year)}-{int(selected_month):02d}-{day:02d}"
+        
+        is_today = date_str == today_str
+        is_future = datetime.date(int(selected_year), int(selected_month), day) > today
+        
+        day_acts = daily_sm.get(date_str, [])
+        
+        # Determine cell background from primary activity
+        cell_bg = "#0f172a"
+        cell_text = "#e2e8f0"
+        if day_acts and not is_future:
+            for act in day_acts:
+                at = act['type']
+                if at in _SM_COLOR_PRIORITY:
+                    cell_bg, cell_text = _SM_COLOR_PRIORITY[at]
+                    break
+        
+        if is_future:
+            cell_bg = "#0f172a"
+            cell_text = "#e2e8f0"
+        
+        cell_border = f"border: 2px solid #eab308; box-shadow: 0 0 10px rgba(234, 179, 8, 0.3);" if is_today else f"border: 2px solid {cell_bg};"
+        
+        html += f"<div class='sm-cal-cell' style='background-color: {cell_bg}; color: {cell_text}; {cell_border}'>"
+        html += f"<div class='sm-cal-date'>{day}</div>"
+        
+        for act in day_acts:
+            act_type = act['type']
+            
+            # Display label overrides (cosmetic only, data unchanged)
+            _DISPLAY_LABEL = {'WentOutside': 'WentOut'}
+            display_type = _DISPLAY_LABEL.get(act_type, act_type)
+            
+            dur = act.get('duration', 0) or 0
+            amt = act.get('amount', 0) or 0
+            
+            # Duration formatting
+            if dur > 0:
+                dur_rounded = round(dur, 2)
+                val = f"{dur_rounded:.2f}".rstrip('0').rstrip('.') + "h"
+            elif amt > 0:
+                val = f"₹{amt}"
+            else:
+                val = ""
+            
+            desc = ""
+            if act['subject'] and act['subject'] != 'D-Day Exam': desc += str(act['subject']) + " "
+            if act['chapter']: desc += str(act['chapter'])
+            
+            time_str = f"[{act['start_time']}] " if act.get('start_time') else ""
+            
+            main_text = f"{time_str}{act_type}"
+            if val: main_text += f" ({val})"
+            
+            # Tag uses semi-transparent bg on colored cell
+            tag_bg = "rgba(255,255,255,0.15)"
+            tag_text = cell_text
+            
+            html += f"<div class='sm-act-tag' style='background: {tag_bg}; color: {tag_text};'>"
+            html += f"<div>{main_text}</div>"
+            if desc.strip():
+                html += f"<div class='sm-desc' style='color: {tag_text};'>{desc.strip()}</div>"
+            html += "</div>"
+            
+        html += "</div>"
+        
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    st.markdown("""
+    <style>
+    .activities-box {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 2px solid #fbbf24;
+        border-radius: 14px;
+        padding: 16px;
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    .activities-box-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #fbbf24;
+        margin-bottom: 16px;
+    }
+    .activities-left-section {
+        padding-right: 16px;
+        border-right: 2px solid rgba(251, 191, 36, 0.3);
+    }
+    .activities-right-section {
+        padding-left: 16px;
+        overflow-y: auto;
+        max-height: 500px;
+    }
+    </style>
+    <div class='activities-box'>
+    <div class='activities-box-title'>📝 View Social Life by Date</div>
+    """, unsafe_allow_html=True)
+    
+    act_left, act_right = st.columns([1, 1.5])
+    
+    with act_left:
+        st.markdown("<div class='activities-left-section'>", unsafe_allow_html=True)
+        st.markdown("**📅 Select Date:**", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        selected_date = st.date_input(
+            "Date",
+            value=today,
+            min_value=today - datetime.timedelta(days=730),
+            max_value=today,
+            key="sm_cal_datepicker_left",
+            label_visibility="collapsed"
+        )
+        
+        date_str = str(selected_date) if selected_date else None
+        
+        date_acts = sm_df[sm_df['date'] == date_str].sort_values('id', ascending=False) if (date_str and not sm_df.empty) else pd.DataFrame()
+        total_sm_dur = date_acts['duration'].sum() if not date_acts.empty else 0
+        total_sm_amt = date_acts['amount'].sum() if not date_acts.empty else 0
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if total_sm_dur > 0: st.metric("Total Hrs", f"{total_sm_dur:.1f}h")
+        if total_sm_amt > 0: st.metric("Total Expense", f"₹{total_sm_amt:.1f}")
+    
+    with act_right:
+        st.markdown("<div class='activities-right-section'>", unsafe_allow_html=True)
+        
+        if selected_date:
+            if not date_acts.empty:
+                st.markdown(f"**📋 {date_str}**")
+                st.divider()
+                
+                for _, row in date_acts.iterrows():
+                    _rid = int(row['id'])
+                    _parts = [row['type']]
+                    if row['subject']: _parts.append(str(row['subject']))
+                    
+                    ch_clean = get_clean_chapter(row['chapter'])
+                    st_val = row.get('start_time')
+                    if not st_val:
+                        hr = extract_time_of_day(row['chapter'])
+                        if hr is not None: st_val = f"{hr}:00"
+                    
+                    if ch_clean: _parts.append(ch_clean)
+                    if st_val: _parts.append(f"[{st_val}]")
+                    
+                    _val = f"{row['duration']}h" if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
+                    if _val: _parts.append(_val)
+                    
+                    activity_text = ' | '.join(_parts)
+                    
+                    _act_container = st.container()
+                    with _act_container:
+                        _col_text, _col_del = st.columns([3.5, 1])
+                        with _col_text:
+                            st.caption(f"**{activity_text}**")
+                        with _col_del:
+                            if st.button("🗑️", key=f"del_sm_{_rid}", help="Delete Activity", width='stretch'):
+                                st.session_state[f"confirm_sm_{_rid}"] = True
+                    
+                    if st.session_state.get(f"confirm_sm_{_rid}", False):
+                        _confirm_col = st.container()
+                        with _confirm_col:
+                            st.warning(f"Delete?", icon="⚠️")
+                            _yc, _nc = st.columns([1, 1])
+                            with _yc:
+                                if st.button("✅ Yes", key=f"yes_sm_{_rid}", width='stretch'):
+                                    c.execute("DELETE FROM activities WHERE id=%s", (_rid,))
+                                    conn.commit()
+                                    st.toast(f"🗑️ Activity deleted", icon="🗑️")
+                                    st.session_state[f"confirm_sm_{_rid}"] = False
+                                    st.rerun()
+                            with _nc:
+                                if st.button("❌ No", key=f"no_sm_{_rid}", width='stretch'):
+                                    st.session_state[f"confirm_sm_{_rid}"] = False
+                                    st.rerun()
+                    
+                    st.caption("")
+            else:
+                st.info(f"No social life activities on {date_str}", icon="ℹ️")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------- STUDY CALENDAR ----------------
+elif menu == "Study Calendar":
+    st.title("📚 Study Calendar")
+    
+    import calendar as calmod
+    import datetime
+    
+    today = get_ist_now().date()
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        selected_year = st.number_input("Year", value=today.year, min_value=2020, max_value=2100, key="sc_cal_yr", step=1)
+    with col2:
+        selected_month = st.number_input("Month", value=today.month, min_value=1, max_value=12, key="sc_cal_mo", step=1)
+    
+    # Activities to show on Study Calendar
+    _SC_TYPES = ['Study', 'Test', 'Coaching', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Form Fillup', 'Strategy Planning', 'Resource Collection']
+    # Activities whose text should render in golden
+    _SC_GOLDEN_TEXT = ['Form Fillup', 'Strategy Planning', 'Resource Collection']
+    
+    df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    if not df.empty:
+        if 'start_time' not in df.columns: df['start_time'] = None
+        df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
+        df['chapter'] = df['chapter'].apply(get_clean_chapter)
+    
+    # Filter to study activities only
+    sc_df = df[df['type'].isin(_SC_TYPES)].copy() if not df.empty else pd.DataFrame()
+    
+    # Build daily productive hours (same logic as main calendar)
+    daily_prod = {}
+    if not sc_df.empty:
+        for d, g in sc_df.groupby("date"):
+            prod_hrs = g[g['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
+            daily_prod[str(d)] = prod_hrs
+    
+    # Build daily activity details
+    daily_sc = {}
+    if not sc_df.empty:
+        for d, g in sc_df.groupby("date"):
+            agg = {}
+            for _, r in g.iterrows():
+                t = r['type']
+                s = r.get('subject', '') or ''
+                c = r.get('chapter', '') or ''
+                dur = float(r.get('duration', 0) or 0)
+                amt = float(r.get('amount', 0) or 0)
+                
+                if t not in ['Study', 'Revision', 'Coaching', 'Form Fillup', 'Strategy Planning', 'Resource Collection']:
+                    k = (t, s, c, _)
+                else:
+                    k = (t, s, c)
+                    
+                if k not in agg:
+                    agg[k] = {'type': t, 'subject': s, 'duration': 0.0, 'amount': 0.0, 'chapter_items': []}
+                
+                agg[k]['duration'] += dur
+                agg[k]['amount'] += amt
+                if c:
+                    agg[k]['chapter_items'].append(str(c))
+                    
+            final_acts = []
+            for k, data in agg.items():
+                t = data['type']
+                ch_items = data['chapter_items']
+                if t in ['Answer Writing', 'Practice']:
+                    final_ch = ch_items[0] if ch_items else ""
+                elif t == 'Test':
+                    final_ch = ch_items[0] if ch_items else ""
+                elif t == 'Book Reading':
+                    final_ch = ch_items[0] if ch_items else ""
+                else:
+                    uniq = []
+                    for ch in ch_items:
+                        if ch and ch not in uniq: uniq.append(ch)
+                    final_ch = ", ".join(uniq)
+                
+                data['chapter'] = final_ch
+                final_acts.append(data)
+                
+            daily_sc[str(d)] = final_acts
+    
+    month_name = calmod.month_name[int(selected_month)]
+    st.subheader(f"{month_name} {int(selected_year)}")
+    
+    _, num_days = calmod.monthrange(int(selected_year), int(selected_month))
+    first_weekday = calmod.weekday(int(selected_year), int(selected_month), 1)
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    
+    # Same color map as main calendar
+    color_map = {
+        "black": ("#1a1a1a", "#ffffff"),
+        "red": ("#dc2626", "#ffffff"),
+        "lightblue": ("#38bdf8", "#000000"),
+        "green": ("#22c55e", "#000000"),
+        "gold": ("#fbbf24", "#000000"),
+        "white": ("#ffffff", "#000000")
+    }
+    
+    html = """
+    <style>
+    .sc-cal-wrapper {
+        display: flex;
+        flex-direction: column;
+    }
+    .sc-cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 10px;
+        margin: 15px 0 0 0;
+    }
+    .sc-cal-header {
+        font-weight: 900;
+        font-size: 15px;
+        text-align: center;
+        padding: 14px 8px;
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        color: #e0e7ff;
+        border-radius: 8px;
+        border: 2px solid #475569;
+        letter-spacing: 0.5px;
+    }
+    .sc-cal-cell {
+        border: 2px solid #475569;
+        border-radius: 12px;
+        padding: 12px 10px;
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+        font-size: 12px;
+        transition: all 0.25s ease, transform 0.2s ease;
+        cursor: pointer;
+        gap: 4px;
+        overflow: hidden;
+    }
+    .sc-cal-cell:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+    }
+    .sc-cal-cell.empty {
+        background: transparent !important;
+        border: none !important;
+        cursor: default;
+        min-height: auto;
+    }
+    .sc-cal-cell.empty:hover {
+        transform: none;
+        box-shadow: none;
+        border-color: transparent;
+    }
+    .sc-cal-date {
+        font-weight: 900;
+        font-size: 22px;
+        margin-bottom: 2px;
+        line-height: 1;
+    }
+    .sc-cal-prod {
+        font-size: 12px;
+        font-weight: 700;
+        padding: 5px 7px;
+        border-radius: 5px;
+        margin-bottom: 2px;
+    }
+    .sc-act-item {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 5px;
+        border-radius: 4px;
+        margin-bottom: 2px;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* Tablet */
+    @media (max-width: 900px) {
+        .sc-cal-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .sc-cal-header { font-size: 13px; padding: 10px 6px; }
+        .sc-cal-cell { min-height: 120px; padding: 10px 8px; }
+        .sc-cal-date { font-size: 19px; }
+        .sc-act-item { font-size: 10px; }
+    }
+    /* Mobile */
+    @media (max-width: 550px) {
+        .sc-cal-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .sc-cal-header { font-size: 12px; padding: 8px 4px; }
+        .sc-cal-cell { min-height: 100px; padding: 8px 6px; }
+        .sc-cal-date { font-size: 16px; }
+        .sc-cal-prod { font-size: 10px; }
+        .sc-act-item { font-size: 9px; }
+    }
+    </style>
+    <div class="sc-cal-wrapper"><div class="sc-cal-grid">
+    """
+    
+    for day in day_names:
+        html += f"<div class='sc-cal-header'>{day}</div>"
+        
+    for _ in range(first_weekday):
+        html += "<div class='sc-cal-cell empty'></div>"
+        
+    today_str = str(today)
+    
+    for day in range(1, num_days + 1):
+        date_str = f"{int(selected_year)}-{int(selected_month):02d}-{day:02d}"
+        is_today = date_str == today_str
+        is_future = datetime.date(int(selected_year), int(selected_month), day) > today
+        
+        prod_hours = daily_prod.get(date_str, 0)
+        
+        if is_future:
+            color_name = "white"
+        else:
+            color_name = get_study_color(date_str, prod_hours)
+        
+        bg_color, text_color = color_map.get(color_name, ("#0f172a", "#e2e8f0"))
+        
+        cell_border = f"border: 2px solid #eab308; box-shadow: 0 0 10px rgba(234, 179, 8, 0.3);" if is_today else f"border: 1px solid {bg_color};"
+        
+        html += f"<div class='sc-cal-cell' style='background-color: {bg_color}; color: {text_color}; {cell_border}'>"
+        html += f"<div class='sc-cal-date'>{day}</div>"
+        
+        if prod_hours > 0 and not is_future:
+            text_for_prod = "#000000" if bg_color in ["#fbbf24", "#ffffff", "#38bdf8", "#22c55e"] else "#ffffff"
+            html += f"<div class='sc-cal-prod' style='background: rgba(255,255,255,0.2); color: {text_for_prod}'>⏱️ {prod_hours:.1f}h</div>"
+        
+        day_acts = daily_sc.get(date_str, [])
+        
+        # Subject abbreviation map
+        _SUBJ_SHORT = {
+            'History': 'HIST', 'Ancient': 'Ancient', 'Medieval': 'Medieval',
+            'Modern': 'Modern', 'Art&Culture': 'ANC',
+            'Geography': 'Geo', 'Indian-Geography': 'Ind-Geo',
+            'Physical-Geography': 'Phy-Geo', 'Human-Geography': 'Human-Geo',
+            'Environment': 'ENV', 'Economics': 'ECO',
+            'Post Independence': 'PostIndep', 'Post-Independence': 'PostIndep',
+            'Sociology': 'Socio', 'bookstawa': 'Bstawa', 'Bookstawa': 'Bstawa'
+        }
+        
+        for act in day_acts:
+            act_type = act['type']
+            act_sub = act.get('subject', '') or ''
+            act_ch = act.get('chapter', '') or ''
+            dur = act.get('duration', 0) or 0
+            amt = act.get('amount', 0) or 0
+            
+            # Abbreviate subject
+            act_sub_disp = _SUBJ_SHORT.get(act_sub, act_sub)
+            
+            # Determine text color for this activity item
+            item_text_color = text_color
+            is_dday = (act_type == 'Test' and act_sub == 'D-Day Exam')
+            is_golden_text = act_type in _SC_GOLDEN_TEXT
+            
+            if is_dday or is_golden_text:
+                if bg_color == "#fbbf24":
+                    item_text_color = "#000000"  # Black on Golden background
+                else:
+                    item_text_color = "#eab308"  # Golden
+            
+            # Build label with truncated duration
+            label_parts = []
+            if act_sub_disp: 
+                sub_str = str(act_sub_disp).replace('Bookstawa', 'Bstawa').replace('bookstawa', 'Bstawa')
+                label_parts.append(sub_str)
+            if act_ch: 
+                ch_str = str(act_ch).replace('Bookstawa', 'Bstawa').replace('bookstawa', 'Bstawa')
+                label_parts.append(ch_str)
+            if dur > 0:
+                dur_rounded = round(dur, 2)
+                val = f"{dur_rounded:.2f}h".rstrip('0').rstrip('.') + 'h' if '.' in f"{dur_rounded}" else f"{int(dur_rounded)}h"
+                label_parts.append(val)
+            elif amt > 0:
+                label_parts.append(f"₹{amt}")
+            
+            label = ' · '.join(label_parts)
+            
+            html += f"<div class='sc-act-item' style='color: {item_text_color}; background: rgba(255,255,255,0.1);' title='{label}'>{label}</div>"
+        
+        html += "</div>"
+    
+    html += "</div></div>"
+    st.markdown(html, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Detailed view below the calendar
+    st.markdown("""
+    <style>
+    .sc-detail-box {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 2px solid #4f46e5;
+        border-radius: 14px;
+        padding: 16px;
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    .sc-detail-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #a78bfa;
+        margin-bottom: 16px;
+    }
+    </style>
+    <div class='sc-detail-box'>
+    <div class='sc-detail-title'>📝 View Study Activities by Date</div>
+    """, unsafe_allow_html=True)
+    
+    sc_left, sc_right = st.columns([1, 1.5])
+    
+    with sc_left:
+        st.markdown("**📅 Select Date:**")
+        sc_sel_date = st.date_input(
+            "Date",
+            value=today,
+            min_value=today - datetime.timedelta(days=730),
+            max_value=today,
+            key="sc_cal_datepicker",
+            label_visibility="collapsed"
+        )
+        
+        sc_date_str = str(sc_sel_date) if sc_sel_date else None
+        sc_date_acts = sc_df[sc_df['date'] == sc_date_str].sort_values('id', ascending=False) if (sc_date_str and not sc_df.empty) else pd.DataFrame()
+        sc_total_dur = sc_date_acts['duration'].sum() if not sc_date_acts.empty else 0
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.metric("Study Hrs", f"{sc_total_dur:.1f}h")
+    
+    with sc_right:
+        if sc_sel_date:
+            if not sc_date_acts.empty:
+                st.markdown(f"**📋 {sc_date_str}**")
+                st.divider()
+                
+                for _, row in sc_date_acts.iterrows():
+                    _rid = int(row['id'])
+                    _parts = [row['type']]
+                    if row['subject']: _parts.append(str(row['subject']))
+                    
+                    ch_clean = get_clean_chapter(row['chapter'])
+                    st_val = row.get('start_time')
+                    if not st_val:
+                        hr = extract_time_of_day(row['chapter'])
+                        if hr is not None: st_val = f"{hr}:00"
+                    
+                    if ch_clean: _parts.append(ch_clean)
+                    if st_val: _parts.append(f"[{st_val}]")
+                    
+                    _val = f"{row['duration']}h" if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
+                    if _val: _parts.append(_val)
+                    
+                    activity_text = ' | '.join(_parts)
+                    
+                    _act_container = st.container()
+                    with _act_container:
+                        _col_text, _col_del = st.columns([3.5, 1])
+                        with _col_text:
+                            st.caption(f"**{activity_text}**")
+                        with _col_del:
+                            if st.button("🗑️", key=f"del_sc_{_rid}", help="Delete Activity", width='stretch'):
+                                st.session_state[f"confirm_sc_{_rid}"] = True
+                    
+                    if st.session_state.get(f"confirm_sc_{_rid}", False):
+                        _confirm_col = st.container()
+                        with _confirm_col:
+                            st.warning(f"Delete?", icon="⚠️")
+                            _yc, _nc = st.columns([1, 1])
+                            with _yc:
+                                if st.button("✅ Yes", key=f"yes_sc_{_rid}", width='stretch'):
+                                    c.execute("DELETE FROM activities WHERE id=%s", (_rid,))
+                                    conn.commit()
+                                    st.toast(f"🗑️ Activity deleted", icon="🗑️")
+                                    st.session_state[f"confirm_sc_{_rid}"] = False
+                                    st.rerun()
+                            with _nc:
+                                if st.button("❌ No", key=f"no_sc_{_rid}", width='stretch'):
+                                    st.session_state[f"confirm_sc_{_rid}"] = False
+                                    st.rerun()
+                    
+                    st.caption("")
+            else:
+                st.info(f"No study activities on {sc_date_str}", icon="ℹ️")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # ---------------- SET TARGET ----------------
 elif menu == "Set Target":
     st.title("📚 Set Target")
@@ -2297,7 +3504,7 @@ elif menu == "Set Target":
     with st.form("new_target_form"):
         f_col1, f_col2 = st.columns(2)
         with f_col1:
-            subj_choice = st.selectbox("Subject / Topic", study_subjects + ["➕ Custom Subject"])
+            subj_choice = st.selectbox("Subject / Topic", get_user_subjects(USER) + ["➕ Custom Subject"])
         with f_col2:
             goal_type = st.selectbox("Goal Type", GOAL_TYPES)
 
@@ -2330,6 +3537,9 @@ elif menu == "Set Target":
                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (final_subject, int(total_ch), str(deadline), USER, date_created, "", goal_type, final_unit, custom_subject_input.strip())
                 )
+                # Also add custom subject to user_subjects table so it's available everywhere
+                if subj_choice == "➕ Custom Subject":
+                    c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, final_subject))
                 conn.commit()
                 st.toast(f"✅ Target for '{final_subject}' saved!", icon="✅")
                 st.rerun()
@@ -2493,7 +3703,7 @@ elif menu == "Set Target":
         for _, t in tgt_df.iterrows():
             sub = t['subject']
             # Get dates from target
-            today = pd.Timestamp.today().date()
+            today = get_ist_now().date()
             set_date = pd.to_datetime(t.get('set_date', t['deadline'])).date() if 'set_date' in t and pd.notna(t.get('set_date')) else (today - timedelta(days=365))
             achieve_date = pd.to_datetime(t.get('achieve_date', today)).date() if 'achieve_date' in t and pd.notna(t.get('achieve_date')) else today
             
@@ -2553,6 +3763,15 @@ elif menu == "Set Target":
                 if st.button("❌ No, Keep", key="no_del_tgt"):
                     st.session_state["confirm_del_tgt"] = False
                     st.rerun()
+
+    # ── SMART WORK TIPS (Set Target Page) ──
+    _st_tips = generate_smart_work_tips(
+        prod_hours=0, waste_hours=0, essential_hours=0,
+        study_streak=0, focus_pct=0, subject_count=0,
+        productivity_pct=0, context="target"
+    )
+    with st.expander("⚡ Smart Work Tips & Target Strategies", expanded=False):
+        st.markdown(render_smart_work_section(_st_tips, max_tips=10), unsafe_allow_html=True)
 
 # ---------------- STUDY TARGET MANAGER ----------------
 elif menu == "Study Target Manager":
@@ -2861,6 +4080,13 @@ elif menu == "Study Target Manager":
                 _prelims_subjects = []
                 _mains_subjects = []
             
+            # Import upsc_strategy_data
+            try:
+                import upsc_strategy_data as _usd
+                _all_subjects_data = _usd.ALL_SUBJECTS
+            except ImportError:
+                _all_subjects_data = {}
+            
             # Build subject importance map
             _subj_importance = {}
             for s in _prelims_subjects:
@@ -2871,24 +4097,37 @@ elif menu == "Study Target Manager":
                     'strategy': s['revision_strategy']
                 }
             
-            st.markdown("""
-            <div style="
-                background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a5f 100%);
-                padding: 24px 28px 16px 28px; border-radius: 16px;
-                border: 1px solid #4f46e5; margin-bottom: 20px;
-                box-shadow: 0 8px 32px rgba(79, 70, 229, 0.15);
-            ">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                    <span style="font-size: 28px;">📚</span>
-                    <h2 style="margin: 0; color: #e0e7ff; font-weight: 800;">Smart Study Techniques & Methods</h2>
-                </div>
-                <p style="margin: 0; color: #a5b4fc; font-size: 14px;">
-                    Proven study & productivity techniques mapped to your UPSC subjects based on PYQ trends and syllabus weight.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e3a5f 100%);padding:24px 28px 16px 28px;border-radius:16px;border:1px solid #4f46e5;margin-bottom:20px;box-shadow:0 8px 32px rgba(79,70,229,0.15);"><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;"><span style="font-size:28px;">\U0001f4da</span><h2 style="margin:0;color:#e0e7ff;font-weight:800;">Smart Study Techniques &amp; Methods</h2></div><p style="margin:0;color:#a5b4fc;font-size:14px;">Proven study &amp; productivity techniques mapped to your UPSC subjects based on PYQ trends and syllabus weight.</p></div>', unsafe_allow_html=True)
             
             # ── TAB LAYOUT ──
+            # Inject CSS to make tab content panels scrollable so all subjects are visible
+            st.markdown("""
+            <style>
+                /* Make the tab content panels scrollable across all tabs */
+                div[data-testid="stTabs"] > div[data-baseweb="tab-panel"] {
+                    max-height: 75vh;
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    padding-right: 8px;
+                }
+                /* Custom scrollbar styling for the tab panels */
+                div[data-testid="stTabs"] > div[data-baseweb="tab-panel"]::-webkit-scrollbar {
+                    width: 6px;
+                }
+                div[data-testid="stTabs"] > div[data-baseweb="tab-panel"]::-webkit-scrollbar-track {
+                    background: #0f172a;
+                    border-radius: 6px;
+                }
+                div[data-testid="stTabs"] > div[data-baseweb="tab-panel"]::-webkit-scrollbar-thumb {
+                    background: #334155;
+                    border-radius: 6px;
+                }
+                div[data-testid="stTabs"] > div[data-baseweb="tab-panel"]::-webkit-scrollbar-thumb:hover {
+                    background: #475569;
+                }
+            </style>
+            """, unsafe_allow_html=True)
+            
             _tech_tab1, _tech_tab2, _tech_tab3 = st.tabs([
                 "🧠 Study Techniques", "⚡ Productivity Methods", "🎯 Subject-wise Strategy"
             ])
@@ -2897,11 +4136,7 @@ elif menu == "Study Target Manager":
             # TAB 1 — STUDY TECHNIQUES
             # ═══════════════════════════════════════════
             with _tech_tab1:
-                st.markdown("""
-                <div style="background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 18px 22px; margin-bottom: 16px;">
-                    <div style="font-size: 13px; color: #94a3b8; margin-bottom: 8px;">💡 Each technique below has been mapped to specific UPSC subjects where it works best.</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown('<div style="background:#0f172a;border:1px solid #334155;border-radius:14px;padding:18px 22px;margin-bottom:16px;"><div style="font-size:13px;color:#94a3b8;margin-bottom:8px;">\U0001f4a1 Each technique below has been mapped to specific UPSC subjects where it works best.</div></div>', unsafe_allow_html=True)
                 
                 import re as _re_md
                 def _md(text):
@@ -2979,43 +4214,153 @@ elif menu == "Study Target Manager":
                         "impact": "Mains = 1750 marks. Without daily writing, you can't finish papers in time. Start early, improve fast.",
                         "color": "#ec4899"
                     },
+                    {
+                        "name": "Interleaving",
+                        "icon": "🔄",
+                        "what": "Mix different subjects/topics in a single study session instead of studying one subject for hours (blocked practice).",
+                        "how": "Study Polity for 45 min → switch to Geography for 45 min → then Economics for 45 min. Your brain constantly re-engages, building stronger retrieval paths.",
+                        "when": "Every study session. Especially effective during revision phases when you have multiple subjects to cover.",
+                        "subjects": "**All subjects** — particularly effective when mixing related subjects: **Polity + Governance**, **History + Art & Culture**, **Geography + Environment**",
+                        "impact": "Research shows 43% better long-term retention vs blocked practice. Feels harder but produces superior results for exam performance.",
+                        "color": "#14b8a6"
+                    },
+                    {
+                        "name": "Elaborative Interrogation",
+                        "icon": "❓",
+                        "what": "After reading any fact, ask yourself 'WHY is this true?' and 'HOW does this work?' — then find the answer.",
+                        "how": "Read: 'Article 356 allows President's Rule.' Ask: WHY was it included? HOW has it been misused? WHAT did Sarkaria Commission say? Forces deeper processing.",
+                        "when": "While reading any new chapter. Write 3-5 'WHY/HOW' questions per topic in margins or separate notebook.",
+                        "subjects": "**Polity** (WHY articles exist), **Economics** (HOW policies work), **History** (WHY events happened), **Ethics** (WHY values matter)",
+                        "impact": "Transforms passive reading into active analysis. Builds the 'analytical thinking' muscle UPSC Mains rewards. 2.5x better than highlighting.",
+                        "color": "#f97316"
+                    },
+                    {
+                        "name": "Dual Coding Theory",
+                        "icon": "🎨",
+                        "what": "Combine verbal information (text/notes) with visual information (diagrams, charts, maps) for every topic.",
+                        "how": "For every chapter, create BOTH a written summary AND a visual aid (flowchart, diagram, table, map). Brain stores them in 2 separate channels, doubling recall routes.",
+                        "when": "After finishing any chapter. Spend 15-20 min creating a visual companion to your text notes.",
+                        "subjects": "**Geography** (maps + data), **Polity** (flowcharts for amendment process), **History** (timelines + event maps), **Science & Tech** (diagrams)",
+                        "impact": "Creates 2 independent memory pathways. Even if you forget the text, the visual cue triggers recall. Essential for Mains diagrams that fetch extra marks.",
+                        "color": "#a855f7"
+                    },
+                    {
+                        "name": "Cornell Note-Taking System",
+                        "icon": "📓",
+                        "what": "Divide your page into 3 sections: Notes (right), Cues/Questions (left), Summary (bottom). Structured notes that double as revision material.",
+                        "how": "**Right column (70%)**: Detailed notes during study. **Left column (30%)**: Key questions/keywords after session. **Bottom**: 2-3 line summary. Cover right → test with left cues.",
+                        "when": "Every time you take notes from any source. Weekly revision using only the cue column.",
+                        "subjects": "**All subjects** — especially for NCERT reading, **Polity** (article-wise notes), **Economics** (concept notes), **Current Affairs** (daily notes)",
+                        "impact": "Combines note-taking with built-in self-testing. Your notes become a complete revision tool. Reduces revision time by 60%.",
+                        "color": "#0ea5e9"
+                    },
+                    {
+                        "name": "Leitner System (Flashcard Method)",
+                        "icon": "🗃️",
+                        "what": "Organize flashcards into 5 boxes based on how well you know each card. Wrong → move back; Right → advance forward.",
+                        "how": "**Box 1**: Review daily. **Box 2**: Every 2 days. **Box 3**: Weekly. **Box 4**: Bi-weekly. **Box 5**: Monthly. Wrong answer → card goes back to Box 1.",
+                        "when": "Daily 20-30 min session. Create cards as you study new topics. Use physical cards or Anki app.",
+                        "subjects": "**Environment** (species, acts, conventions), **Art & Culture** (facts, GI tags), **Polity** (articles, schedules), **Geography** (data, places)",
+                        "impact": "Most efficient system for memorizing 1000+ facts. Focuses energy on weak spots. UPSC Prelims is 50% fact recall — this covers it.",
+                        "color": "#84cc16"
+                    },
+                    {
+                        "name": "Teach-Back Method",
+                        "icon": "👨‍🏫",
+                        "what": "Teach the topic to a study partner, family member, or even to a wall/mirror. Teaching forces you to organize and simplify knowledge.",
+                        "how": "After studying a chapter, explain it to someone for 10 min without notes. Record yourself if alone. Note where you stumble — those are your gaps.",
+                        "when": "After completing each major topic. Weekly study group sessions where everyone teaches one topic.",
+                        "subjects": "**Polity** (explain articles in simple terms), **Economics** (explain schemes to non-students), **Ethics** (discuss case studies), **History** (narrate events)",
+                        "impact": "The 'Protégé Effect' — you learn 90% of what you teach vs 10% of what you read. The ultimate comprehension test.",
+                        "color": "#e11d48"
+                    },
+                    {
+                        "name": "Chunking",
+                        "icon": "🧩",
+                        "what": "Break large amounts of information into smaller, meaningful groups (chunks) that are easier to remember and process.",
+                        "how": "Instead of 50 Articles individually, group: **Fundamental Rights** (14-32), **DPSPs** (36-51), **Duties** (51A). Create acronyms like LEPS for Lok Sabha functions.",
+                        "when": "When facing overwhelming data. Before creating flashcards. During first reading of fact-heavy chapters.",
+                        "subjects": "**Polity** (group articles by theme), **Environment** (group species by biome), **Geography** (group rivers by drainage), **History** (group events by era)",
+                        "impact": "Working memory holds only 4-7 items. Chunking compresses 50 items into 7-10 chunks. Essential for Prelims elimination strategy.",
+                        "color": "#7c3aed"
+                    },
+                    {
+                        "name": "Deliberate Practice",
+                        "icon": "🎯",
+                        "what": "Focus specifically on your weakest areas with targeted, uncomfortable practice rather than revising what you already know.",
+                        "how": "Analyze mock test scores → Identify bottom 3 subjects → Spend 70% of time on THOSE. If you score 40% in Economy, do 2 extra hours of Economy before Polity.",
+                        "when": "After every mock test or weekly review. Adjust study schedule based on data, not comfort.",
+                        "subjects": "**Your weakest subjects first** — check tracker data. Common weak areas: **Economics** (conceptual), **Science & Tech** (application), **Environment** (factual)",
+                        "impact": "Elite performers spend 80% of practice on weaknesses. Studying strengths feels good but doesn't improve scores. Uncomfortable practice = real growth.",
+                        "color": "#dc2626"
+                    },
                 ]
                 
-                for tech in _study_techniques:
-                    st.markdown(f"""
-                    <div style="
-                        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-                        border: 1px solid #334155; border-radius: 16px;
-                        padding: 20px 24px; margin-bottom: 14px;
-                        border-left: 5px solid {tech['color']};
-                    ">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="font-size: 24px;">{tech['icon']}</span>
-                            <span style="font-size: 18px; font-weight: 800; color: #e2e8f0;">{tech['name']}</span>
-                        </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
-                            <div>
-                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📌 What It Is</div>
-                                {_md(tech['what'])}
-                            </div>
-                            <div>
-                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🔧 How to Apply</div>
-                                {_md(tech['how'])}
-                            </div>
-                            <div>
-                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">⏰ When to Use</div>
-                                {_md(tech['when'])}
-                            </div>
-                            <div>
-                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📚 Best For Subjects</div>
-                                {_md(tech['subjects'])}
-                            </div>
-                        </div>
-                        <div style="margin-top: 10px; padding: 8px 14px; background: rgba(139,92,246,0.08); border-radius: 8px; font-size: 12px; color: #a78bfa;">
-                            💡 <strong>Impact:</strong> {_md(tech['impact'])}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                # ── PAGINATION for Study Techniques ──
+                _ST_PER_PAGE = 5
+                _total_st = len(_study_techniques)
+                _total_st_pages = max(1, (_total_st + _ST_PER_PAGE - 1) // _ST_PER_PAGE)
+                
+                if "stm_tech_page" not in st.session_state:
+                    st.session_state.stm_tech_page = 1
+                if st.session_state.stm_tech_page > _total_st_pages:
+                    st.session_state.stm_tech_page = _total_st_pages
+                if st.session_state.stm_tech_page < 1:
+                    st.session_state.stm_tech_page = 1
+                
+                _cur_st_page = st.session_state.stm_tech_page
+                _st_start = (_cur_st_page - 1) * _ST_PER_PAGE
+                _st_end = min(_st_start + _ST_PER_PAGE, _total_st)
+                _page_techniques = _study_techniques[_st_start:_st_end]
+                
+                st.markdown(f"""
+                <div style="display:flex;justify-content:space-between;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 18px;margin-bottom:14px;">
+                    <span style="font-size:13px;color:#94a3b8;">Showing techniques <strong style="color:#38bdf8;">{_st_start+1}–{_st_end}</strong> of <strong style="color:#38bdf8;">{_total_st}</strong></span>
+                    <span style="font-size:13px;color:#a78bfa;font-weight:600;">Page {_cur_st_page} of {_total_st_pages}</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                for tech in _page_techniques:
+                    _t_html = f'<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border:1px solid #334155;border-radius:16px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {tech["color"]};">' \
+                        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><span style="font-size:24px;">{tech["icon"]}</span><span style="font-size:18px;font-weight:800;color:#e2e8f0;">{tech["name"]}</span></div>' \
+                        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;color:#cbd5e1;line-height:1.6;">' \
+                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f4cc What It Is</div>{_md(tech["what"])}</div>' \
+                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f527 How to Apply</div>{_md(tech["how"])}</div>' \
+                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\u23f0 When to Use</div>{_md(tech["when"])}</div>' \
+                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f4da Best For Subjects</div>{_md(tech["subjects"])}</div>' \
+                        f'</div><div style="margin-top:10px;padding:8px 14px;background:rgba(139,92,246,0.08);border-radius:8px;font-size:12px;color:#a78bfa;">\U0001f4a1 <strong>Impact:</strong> {_md(tech["impact"])}</div></div>'
+                    st.markdown(_t_html, unsafe_allow_html=True)
+                
+                # ── Pagination controls for Study Techniques ──
+                _st_c1, _st_c2, _st_c3, _st_c4, _st_c5 = st.columns([1, 1, 2, 1, 1])
+                with _st_c1:
+                    if st.button("⏮ First", key="stm_tech_first", disabled=(_cur_st_page <= 1), use_container_width=True):
+                        st.session_state.stm_tech_page = 1
+                        st.rerun()
+                with _st_c2:
+                    if st.button("◀ Prev", key="stm_tech_prev", disabled=(_cur_st_page <= 1), use_container_width=True):
+                        st.session_state.stm_tech_page = _cur_st_page - 1
+                        st.rerun()
+                with _st_c3:
+                    _new_st_page = st.selectbox(
+                        "Page",
+                        options=list(range(1, _total_st_pages + 1)),
+                        index=_cur_st_page - 1,
+                        key="stm_tech_page_select",
+                        label_visibility="collapsed",
+                        format_func=lambda x: f"📄 Page {x} of {_total_st_pages}"
+                    )
+                    if _new_st_page != _cur_st_page:
+                        st.session_state.stm_tech_page = _new_st_page
+                        st.rerun()
+                with _st_c4:
+                    if st.button("Next ▶", key="stm_tech_next", disabled=(_cur_st_page >= _total_st_pages), use_container_width=True):
+                        st.session_state.stm_tech_page = _cur_st_page + 1
+                        st.rerun()
+                with _st_c5:
+                    if st.button("Last ⏭", key="stm_tech_last", disabled=(_cur_st_page >= _total_st_pages), use_container_width=True):
+                        st.session_state.stm_tech_page = _total_st_pages
+                        st.rerun()
             
             # ═══════════════════════════════════════════
             # TAB 2 — PRODUCTIVITY METHODS
@@ -3078,36 +4423,136 @@ elif menu == "Study Target Manager":
                         "apply": "Remove all choice from your environment. When you sit at your desk, the ONLY thing you can do is study. Willpower is finite — environment design is permanent.",
                         "color": "#ec4899"
                     },
+                    {
+                        "name": "Eisenhower Matrix",
+                        "icon": "📐",
+                        "what": "Categorize every task into 4 quadrants: Urgent+Important (DO), Important+Not Urgent (SCHEDULE), Urgent+Not Important (DELEGATE), Neither (ELIMINATE).",
+                        "routine": "**Morning 5 min**: List today's tasks → Assign to quadrants. **Quadrant 2** (Important, Not Urgent) is where UPSC prep lives — schedule it FIRST. Never let Quadrant 3 eat your study time.",
+                        "apply": "Current Affairs = Q1 (daily urgency). Syllabus study = Q2 (most important, schedule it). Social media = Q4 (eliminate). Random YouTube = Q3 (delegate to break time only).",
+                        "color": "#0891b2"
+                    },
+                    {
+                        "name": "Accountability Partner System",
+                        "icon": "🤝",
+                        "what": "Partner with another serious UPSC aspirant. Share daily targets, report progress every night, and call each other out on slacking.",
+                        "routine": "**Morning**: Share today's study plan with partner. **Night**: Report what you actually did. **Weekly**: Compare study hours from trackers. The social pressure makes skipping feel costly.",
+                        "apply": "Find 1-2 serious aspirants (in-person or online group). Use WhatsApp/Telegram for daily check-ins. Share screenshots of your Study Routine Tracker data weekly.",
+                        "color": "#7c3aed"
+                    },
+                    {
+                        "name": "Digital Detox Windows",
+                        "icon": "📵",
+                        "what": "Designate 3-4 hour blocks where ALL screens (except study material) are OFF. No phone, no social media, no notifications.",
+                        "routine": "**6-10 AM**: Phone in airplane mode, study only. **2-5 PM**: Second detox window. **Before bed**: No screens 30 min before sleep. Use physical books during detox windows.",
+                        "apply": "Install app blockers (Forest, Freedom). Delete Instagram/YouTube from phone during prep months. The average person checks their phone 96 times/day — each check costs 23 min of focus recovery.",
+                        "color": "#dc2626"
+                    },
+                    {
+                        "name": "Energy Management (Not Time Management)",
+                        "icon": "🔋",
+                        "what": "Match task difficulty to your energy levels throughout the day. Hard subjects when energy is HIGH, easy review when energy is LOW.",
+                        "routine": "**Peak hours (6-11 AM for most)**: New chapters, answer writing, conceptual subjects. **Low hours (2-4 PM)**: Revision, flashcards, current affairs reading. **Recovery (evening)**: Light notes, mind maps.",
+                        "apply": "Track your energy for 1 week — note when you feel most alert vs. drowsy. Schedule your weakest/hardest subject during peak energy. Never waste peak hours on easy tasks.",
+                        "color": "#16a34a"
+                    },
+                    {
+                        "name": "Task Batching",
+                        "icon": "📦",
+                        "what": "Group similar tasks together and do them in one go. Context-switching between different types of work kills productivity.",
+                        "routine": "**Batch 1**: All newspaper/CA reading in one 1h slot. **Batch 2**: All note-making in one session. **Batch 3**: All PYQ solving together. **Batch 4**: All revision flashcards in one session.",
+                        "apply": "Don't read 1 article, then solve 1 PYQ, then make 1 note. Instead: read ALL articles → make ALL notes → solve ALL PYQs. Each context switch costs 15-25 min of refocusing.",
+                        "color": "#ca8a04"
+                    },
+                    {
+                        "name": "Reflection Journaling",
+                        "icon": "📔",
+                        "what": "Spend 10 minutes before bed writing: What went well today? What didn't? What will I do differently tomorrow?",
+                        "routine": "**3 questions nightly**: (1) Best study moment today? (2) Biggest time waste? (3) Tomorrow's #1 priority. Review weekly. Patterns emerge that data alone can't show.",
+                        "apply": "Use a physical notebook — handwriting engages deeper processing. Be brutally honest. Track patterns: if 'phone distraction' appears 5/7 days, you have a systemic problem to solve.",
+                        "color": "#9333ea"
+                    },
+                    {
+                        "name": "Habit Stacking",
+                        "icon": "🔗",
+                        "what": "Link a new habit to an existing one: 'After I [CURRENT HABIT], I will [NEW HABIT].' Uses existing neural pathways to anchor new behaviors.",
+                        "routine": "**After brushing teeth** → Read 1 editorial. **After morning tea** → 30 min active recall. **After lunch** → 15 min flashcard review. **After dinner** → Write 1 Mains answer.",
+                        "apply": "Start with 2-minute mini-habits. Don't say 'I'll study 3 hours after waking up.' Say 'After I drink water, I'll open my book for 2 minutes.' The habit, not the duration, matters initially.",
+                        "color": "#059669"
+                    },
+                    {
+                        "name": "Implementation Intentions (If-Then Planning)",
+                        "icon": "🎪",
+                        "what": "Pre-decide your response to common obstacles: 'IF [obstacle occurs], THEN I will [specific action].' Removes decision fatigue in the moment.",
+                        "routine": "**IF** I feel like checking my phone → **THEN** I will do 5 deep breaths and continue studying. **IF** I feel sleepy after lunch → **THEN** I will walk for 5 min and switch to an interesting subject.",
+                        "apply": "Write 5-7 IF-THEN statements for your most common productivity killers. Stick them on your study desk. Research shows this doubles follow-through rates compared to motivation alone.",
+                        "color": "#b91c1c"
+                    },
                 ]
                 
-                for method in _prod_methods:
-                    st.markdown(f"""
-                    <div style="
-                        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-                        border: 1px solid #334155; border-radius: 16px;
-                        padding: 20px 24px; margin-bottom: 14px;
-                        border-left: 5px solid {method['color']};
-                    ">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-                            <span style="font-size: 24px;">{method['icon']}</span>
-                            <span style="font-size: 18px; font-weight: 800; color: #e2e8f0;">{method['name']}</span>
-                        </div>
-                        <div style="font-size: 13px; color: #cbd5e1; line-height: 1.6;">
-                            <div style="margin-bottom: 10px;">
-                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📌 What It Is: </span>
-                                {_md(method['what'])}
-                            </div>
-                            <div style="margin-bottom: 10px;">
-                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📅 Daily Routine: </span>
-                                {_md(method['routine'])}
-                            </div>
-                            <div>
-                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">🔧 How to Apply: </span>
-                                {_md(method['apply'])}
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                # ── PAGINATION for Productivity Methods ──
+                _PM_PER_PAGE = 5
+                _total_pm = len(_prod_methods)
+                _total_pm_pages = max(1, (_total_pm + _PM_PER_PAGE - 1) // _PM_PER_PAGE)
+                
+                if "stm_prod_page" not in st.session_state:
+                    st.session_state.stm_prod_page = 1
+                if st.session_state.stm_prod_page > _total_pm_pages:
+                    st.session_state.stm_prod_page = _total_pm_pages
+                if st.session_state.stm_prod_page < 1:
+                    st.session_state.stm_prod_page = 1
+                
+                _cur_pm_page = st.session_state.stm_prod_page
+                _pm_start = (_cur_pm_page - 1) * _PM_PER_PAGE
+                _pm_end = min(_pm_start + _PM_PER_PAGE, _total_pm)
+                _page_methods = _prod_methods[_pm_start:_pm_end]
+                
+                st.markdown(f"""
+                <div style="display:flex;justify-content:space-between;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 18px;margin-bottom:14px;">
+                    <span style="font-size:13px;color:#94a3b8;">Showing methods <strong style="color:#38bdf8;">{_pm_start+1}–{_pm_end}</strong> of <strong style="color:#38bdf8;">{_total_pm}</strong></span>
+                    <span style="font-size:13px;color:#a78bfa;font-weight:600;">Page {_cur_pm_page} of {_total_pm_pages}</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                for method in _page_methods:
+                    _m_html = f'<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border:1px solid #334155;border-radius:16px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {method["color"]};">' \
+                        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="font-size:24px;">{method["icon"]}</span><span style="font-size:18px;font-weight:800;color:#e2e8f0;">{method["name"]}</span></div>' \
+                        f'<div style="font-size:13px;color:#cbd5e1;line-height:1.6;">' \
+                        f'<div style="margin-bottom:10px;"><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f4cc What It Is: </span>{_md(method["what"])}</div>' \
+                        f'<div style="margin-bottom:10px;"><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f4c5 Daily Routine: </span>{_md(method["routine"])}</div>' \
+                        f'<div><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f527 How to Apply: </span>{_md(method["apply"])}</div>' \
+                        f'</div></div>'
+                    st.markdown(_m_html, unsafe_allow_html=True)
+                
+                # ── Pagination controls for Productivity Methods ──
+                _pm_c1, _pm_c2, _pm_c3, _pm_c4, _pm_c5 = st.columns([1, 1, 2, 1, 1])
+                with _pm_c1:
+                    if st.button("⏮ First", key="stm_prod_first", disabled=(_cur_pm_page <= 1), use_container_width=True):
+                        st.session_state.stm_prod_page = 1
+                        st.rerun()
+                with _pm_c2:
+                    if st.button("◀ Prev", key="stm_prod_prev", disabled=(_cur_pm_page <= 1), use_container_width=True):
+                        st.session_state.stm_prod_page = _cur_pm_page - 1
+                        st.rerun()
+                with _pm_c3:
+                    _new_pm_page = st.selectbox(
+                        "Page",
+                        options=list(range(1, _total_pm_pages + 1)),
+                        index=_cur_pm_page - 1,
+                        key="stm_prod_page_select",
+                        label_visibility="collapsed",
+                        format_func=lambda x: f"📄 Page {x} of {_total_pm_pages}"
+                    )
+                    if _new_pm_page != _cur_pm_page:
+                        st.session_state.stm_prod_page = _new_pm_page
+                        st.rerun()
+                with _pm_c4:
+                    if st.button("Next ▶", key="stm_prod_next", disabled=(_cur_pm_page >= _total_pm_pages), use_container_width=True):
+                        st.session_state.stm_prod_page = _cur_pm_page + 1
+                        st.rerun()
+                with _pm_c5:
+                    if st.button("Last ⏭", key="stm_prod_last", disabled=(_cur_pm_page >= _total_pm_pages), use_container_width=True):
+                        st.session_state.stm_prod_page = _total_pm_pages
+                        st.rerun()
             
             # ═══════════════════════════════════════════
             # TAB 3 — SUBJECT-WISE STRATEGY (from PYQ data)
@@ -3116,100 +4561,183 @@ elif menu == "Study Target Manager":
                 if not _prelims_subjects:
                     st.info("PYQ data not available. Please ensure pyq_data.json exists.")
                 else:
-                    st.markdown("""
-                    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 16px 20px; margin-bottom: 16px;">
-                        <div style="font-size: 14px; color: #e2e8f0; font-weight: 700; margin-bottom: 4px;">🎯 Subject Priority — Based on UPSC PYQ Analysis (Last 10 Years)</div>
-                        <div style="font-size: 12px; color: #94a3b8;">Higher importance score = more questions in Prelims. Study these subjects with maximum depth.</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown('<div style="background:#0f172a;border:1px solid #334155;border-radius:14px;padding:16px 20px;margin-bottom:16px;"><div style="font-size:14px;color:#e2e8f0;font-weight:700;margin-bottom:4px;">\U0001f3af Subject Priority \u2014 Based on UPSC PYQ Analysis (Last 10 Years)</div><div style="font-size:12px;color:#94a3b8;">Click on any subject to expand full strategy, books, chapters, revision plan &amp; proven techniques.</div></div>', unsafe_allow_html=True)
                     
-                    # Subject-technique mapping
-                    _subject_technique_map = {
-                        "Current Affairs": {"technique": "Daily Tracking + Monthly Compilation", "books": "The Hindu, Indian Express, PIB, PRS, Yojana", "hours_weekly": "7h (1h/day)", "method": "Read → Link to GS Paper → 1-line note → Monthly compile"},
-                        "Polity & Constitution": {"technique": "Active Recall + Feynman", "books": "Laxmikanth (M. Laxmikanth), NCERT 9-12, D.D. Basu", "hours_weekly": "6-8h", "method": "Read article → Close book → Write from memory → Compare → Repeat"},
-                        "Modern History": {"technique": "Timeline + Spaced Repetition", "books": "Spectrum (Rajiv Ahir), NCERT 8, 11, 12, Bipin Chandra", "hours_weekly": "5-6h", "method": "Build era-wise timelines → Link leaders to movements → PYQ-based revision"},
-                        "Ancient History": {"technique": "Mind Mapping + Visual Study", "books": "NCERT 6, 11 (Ancient India), Tamil Nadu Board, R.S. Sharma", "hours_weekly": "3-4h", "method": "Map archaeological sites → Create dynasty charts → Visual aids for architecture"},
-                        "Medieval History": {"technique": "Comparative Tables + Timeline", "books": "Satish Chandra, NCERT 7, 11", "hours_weekly": "3-4h", "method": "Compare Sultanate vs Mughal admin → Dynasty comparison tables → Cultural timeline"},
-                        "Art & Culture": {"technique": "Visual Learning + Flashcards", "books": "Nitin Singhania, CCRT website, NCERT Fine Arts", "hours_weekly": "3-4h", "method": "See images/videos of dances/monuments → Create style comparison charts → GI tag lists"},
-                        "Geography": {"technique": "Map-Based Study + SQ3R", "books": "NCERT 6-12, Majid Husain, G.C. Leong, Savindra Singh", "hours_weekly": "5-7h", "method": "Always study with atlas open → Draw maps from memory → Physical-human linkages"},
-                        "Economics": {"technique": "Feynman + Current Data", "books": "Ramesh Singh, NCERT 11-12, Economic Survey, Budget", "hours_weekly": "5-6h", "method": "Understand concept → Link to current budget/data → Simplify in own words"},
-                        "Environment & Ecology": {"technique": "Spaced Repetition + Flashcards", "books": "Shankar IAS, NCERT Biology, Down To Earth magazine", "hours_weekly": "4-5h", "method": "Fact-heavy → Anki flashcards for species/acts → Map protected areas → Weekly revision"},
-                        "Indian Society": {"technique": "Case Study + Data-Based", "books": "NCERT Sociology 11-12, NFHS/Census data, India Year Book", "hours_weekly": "3-4h", "method": "Link social issues to schemes → Use Census data → Practice Mains answers with examples"},
-                        "Governance": {"technique": "Scheme Mapping + Comparison", "books": "India Year Book, ARC Reports, 2nd ARC Recommendations", "hours_weekly": "3-4h", "method": "Create scheme tables (name, year, ministry, benefit) → Track recent launches → Link to governance reforms"},
-                        "International Relations": {"technique": "Current Affairs Integration + Mapping", "books": "Rajesh Rajagopalan, MEA website, Rajya Sabha TV", "hours_weekly": "3-4h", "method": "Track bilateral summits → Map India's neighbourhood relations → Compare foreign policy doctrines"},
-                        "Science & Technology": {"technique": "Concept Cards + News Tracking", "books": "Science Reporter, NCERT Science, ISRO/DRDO websites", "hours_weekly": "3-4h", "method": "Understand basic science → Link to applications → Track space/defence news → Create tech-application tables"},
-                        "Ethics": {"technique": "Case Study Practice + Thinker Quotes", "books": "Lexicon Ethics, IGNOU Ethics material, G. Subba Rao", "hours_weekly": "4-5h", "method": "2 case studies/day → Build thinker-concept map → Practice ethical vocabulary → Real-life application"},
-                        "Internal Security": {"technique": "Institutional Framework + Current Events", "books": "Ashok Kumar, MHA Annual Report, IDSA papers", "hours_weekly": "2-3h", "method": "Map security agencies → Understand legal framework (UAPA, NIA, AFSPA) → Link to current incidents"},
-                        "Sociology (Optional)": {"technique": "Thinker Mastery + Indian Examples", "books": "Haralambos, IGNOU, A.R. Desai, M.N. Srinivas", "hours_weekly": "12-15h", "method": "Master 10 thinkers deeply → Use Indian case studies → Write 20-mark answers in 12 min → Diagrams for every answer"},
+                    # Map pyq_data subject names → upsc_strategy_data keys
+                    _pyq_to_strategy_key = {
+                        "Current Affairs": "current_affairs",
+                        "Polity & Constitution": "polity",
+                        "Modern History": "history",
+                        "Ancient History": "history",
+                        "Medieval History": "history",
+                        "Art & Culture": "art_culture",
+                        "Geography": "geography",
+                        "Economics": "economy",
+                        "Environment & Ecology": "environment",
+                        "Indian Society": "society",
+                        "Governance": "polity",
+                        "International Relations": "international_relations",
+                        "Science & Technology": "science_tech",
+                        "Ethics": "ethics",
+                        "Internal Security": "internal_security",
+                        "Sociology (Optional)": "sociology",
                     }
                     
-                    for subj in _prelims_subjects:
-                        s_name = subj['subject']
-                        s_score = subj['importance_score']
-                        s_rank = subj['frequency_rank']
-                        s_map = _subject_technique_map.get(s_name, {})
+                    # Sort prelims_subjects by frequency_rank (already integers 1-16)
+                    _sorted_subjects = sorted(_prelims_subjects, key=lambda x: x.get('frequency_rank', 999))
+
+                    # ── Render all subjects as expanders (no pagination needed) ──
+                    for _idx, _pyq_subj in enumerate(_sorted_subjects):
+                        _s_name = _pyq_subj['subject']
+                        _s_score = _pyq_subj['importance_score']
+                        _s_rank = _pyq_subj['frequency_rank']
+                        _s_chapters_pyq = _pyq_subj.get('important_chapters', '')
+                        _s_topics_pyq = _pyq_subj.get('important_topics', '')
+                        _s_revision_pyq = _pyq_subj.get('revision_strategy', '')
                         
-                        # Color based on importance
-                        if s_score >= 95:
-                            bar_color = "#ef4444"
-                            badge = "🔴 CRITICAL"
-                        elif s_score >= 90:
-                            bar_color = "#f59e0b"
-                            badge = "🟡 HIGH"
+                        # Get rich data from upsc_strategy_data
+                        _strat_key = _pyq_to_strategy_key.get(_s_name, '')
+                        _strat_data = _all_subjects_data.get(_strat_key, {}) if _strat_key else {}
+                        
+                        # Badge/color
+                        if _s_score >= 95:
+                            _badge = "🔴 CRITICAL"
+                            _badge_color = "#ef4444"
+                        elif _s_score >= 90:
+                            _badge = "🟡 HIGH"
+                            _badge_color = "#f59e0b"
+                        elif _s_score >= 85:
+                            _badge = "🟠 IMPORTANT"
+                            _badge_color = "#f97316"
                         else:
-                            bar_color = "#22c55e"
-                            badge = "🟢 IMPORTANT"
+                            _badge = "🟢 MODERATE"
+                            _badge_color = "#22c55e"
                         
-                        st.markdown(f"""
-                        <div style="
-                            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-                            border: 1px solid #334155; border-radius: 16px;
-                            padding: 20px 24px; margin-bottom: 14px;
-                            border-left: 5px solid {bar_color};
-                        ">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 20px; font-weight: 800; color: #e2e8f0;">#{s_rank} {s_name}</span>
-                                </div>
-                                <div style="display: flex; gap: 8px; align-items: center;">
-                                    <span style="font-size: 11px; padding: 3px 10px; border-radius: 20px; background: rgba(239,68,68,0.1); color: {bar_color}; font-weight: 700;">{badge}</span>
-                                    <span style="font-size: 20px; font-weight: 900; color: {bar_color};">{s_score}/100</span>
-                                </div>
-                            </div>
+                        _exp_label = f"#{_s_rank} {_s_name}  —  {_s_score}/100  {_badge}"
+                        
+                        with st.expander(_exp_label, expanded=False):
+                            # ── Score bar ──
+                            st.markdown(f'<div style="background:#1e293b;border-radius:8px;height:10px;margin-bottom:16px;overflow:hidden;"><div style="background:linear-gradient(90deg,{_badge_color},{_badge_color}88);width:{_s_score}%;height:100%;border-radius:8px;"></div></div>', unsafe_allow_html=True)
                             
-                            <!-- Progress bar -->
-                            <div style="background: #1e293b; border-radius: 8px; height: 8px; margin-bottom: 14px; overflow: hidden;">
-                                <div style="background: linear-gradient(90deg, {bar_color}, {bar_color}88); width: {s_score}%; height: 100%; border-radius: 8px;"></div>
-                            </div>
+                            # ── SECTION 1: High-Frequency Topics & Focus Chapters from PYQ data ──
+                            _sec1_c1, _sec1_c2 = st.columns(2)
+                            with _sec1_c1:
+                                st.markdown(f'**🎯 High-Frequency Topics (PYQ)**')
+                                if _s_topics_pyq:
+                                    for _tp in _s_topics_pyq.split(', '):
+                                        st.markdown(f'- {_tp.strip()}')
+                                else:
+                                    st.caption("N/A")
+                            with _sec1_c2:
+                                st.markdown(f'**📋 Focus Chapters (PYQ)**')
+                                if _s_chapters_pyq:
+                                    for _ch in _s_chapters_pyq.split(', '):
+                                        st.markdown(f'- {_ch.strip()}')
+                                else:
+                                    st.caption("N/A")
                             
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
-                                <div>
-                                    <div style="color: #a78bfa; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📋 Key Chapters</div>
-                                    {subj['important_chapters']}
-                                </div>
-                                <div>
-                                    <div style="color: #a78bfa; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🎯 High-Frequency PYQ Topics</div>
-                                    {subj['important_topics']}
-                                </div>
-                                <div>
-                                    <div style="color: #38bdf8; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🧠 Best Study Technique</div>
-                                    {s_map.get('technique', 'Active Recall + Spaced Repetition')}
-                                </div>
-                                <div>
-                                    <div style="color: #38bdf8; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📚 Standard Books</div>
-                                    {s_map.get('books', 'NCERT + Standard Reference')}
-                                </div>
-                                <div>
-                                    <div style="color: #10b981; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">⏱️ Weekly Hours</div>
-                                    {s_map.get('hours_weekly', '5-6h')}
-                                </div>
-                                <div>
-                                    <div style="color: #10b981; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🔧 How to Apply</div>
-                                    {s_map.get('method', subj['revision_strategy'][:100])}
-                                </div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            st.divider()
+                            
+                            # ── SECTION 2: Standard Books (in order) ──
+                            st.markdown('**📚 Standard Books (Follow in This Order)**')
+                            _book_str = _strat_data.get('book', '')
+                            if _book_str:
+                                _books_list = [b.strip() for b in _book_str.replace(' + ', ', ').replace(' / ', ', ').split(',') if b.strip()]
+                                for _bi, _bk in enumerate(_books_list, 1):
+                                    st.markdown(f'{_bi}. **{_bk}**')
+                            else:
+                                st.caption("NCERT + Standard reference books")
+                            
+                            # Weight & avg questions
+                            _weight = _strat_data.get('weight', '')
+                            _avg_qs = _strat_data.get('avg_qs', '')
+                            if _weight or _avg_qs:
+                                st.markdown(f'> **Prelims Weight:** {_weight} | **Avg Questions/Year:** {_avg_qs}')
+                            
+                            st.divider()
+                            
+                            # ── SECTION 3: Step-by-Step Study Strategy ──
+                            st.markdown('**🧠 Step-by-Step Study Strategy**')
+                            _revision_str = _strat_data.get('revision', '')
+                            _short_notes = _strat_data.get('short_notes', '')
+                            
+                            # Build step-by-step from strategy data
+                            _steps = []
+                            _steps.append(f"**Step 1 — Foundation Read:** Read the standard book ({_strat_data.get('book', 'NCERT').split('+')[0].split('/')[0].strip()}) cover-to-cover. Make basic notes. Don't try to memorize — focus on understanding concepts.")
+                            if _short_notes:
+                                _steps.append(f"**Step 2 — Short Notes:** {_short_notes}")
+                            _steps.append(f"**Step 3 — PYQ Analysis:** Solve last 10 years PYQs topic-wise. Identify which areas UPSC focuses on. Mark topics you got wrong.")
+                            if _revision_str:
+                                _steps.append(f"**Step 4 — Revision Cycle:** {_revision_str}")
+                            _steps.append("**Step 5 — Current Affairs Integration:** Link every static topic to recent news/schemes/events. Maintain a running CA-static linkage sheet.")
+                            _steps.append("**Step 6 — Mock Tests:** Take subject-wise sectional tests. Analyze every wrong answer. Maintain an error journal.")
+                            
+                            for _step in _steps:
+                                st.markdown(f'- {_step}')
+                            
+                            st.divider()
+                            
+                            # ── SECTION 4: Chapter-wise Breakdown (from strategy data) ──
+                            _chapters_data = _strat_data.get('chapters', [])
+                            if _chapters_data:
+                                st.markdown('**📖 Chapter-wise Study Plan**')
+                                # Group by priority
+                                _critical = [c for c in _chapters_data if c.get('priority') == 'Critical']
+                                _high = [c for c in _chapters_data if c.get('priority') == 'High']
+                                _medium = [c for c in _chapters_data if c.get('priority') == 'Medium']
+                                
+                                if _critical:
+                                    st.markdown('🔴 **CRITICAL (Do First — Highest PYQ frequency)**')
+                                    for _ch in _critical:
+                                        _focus_str = ', '.join(_ch.get('focus', [])[:4])
+                                        st.markdown(f'- **{_ch["ch"]}** — Revisions: {_ch.get("revisions", 3)}x | PYQ: {_ch.get("pyq", "N/A")} | Focus: {_focus_str}')
+                                
+                                if _high:
+                                    st.markdown('🟡 **HIGH PRIORITY**')
+                                    for _ch in _high:
+                                        _focus_str = ', '.join(_ch.get('focus', [])[:4])
+                                        st.markdown(f'- **{_ch["ch"]}** — Revisions: {_ch.get("revisions", 3)}x | PYQ: {_ch.get("pyq", "N/A")} | Focus: {_focus_str}')
+                                
+                                if _medium:
+                                    st.markdown('🟢 **MODERATE**')
+                                    for _ch in _medium:
+                                        _focus_str = ', '.join(_ch.get('focus', [])[:3])
+                                        st.markdown(f'- **{_ch["ch"]}** — Revisions: {_ch.get("revisions", 2)}x | PYQ: {_ch.get("pyq", "N/A")} | Focus: {_focus_str}')
+                            
+                            st.divider()
+                            
+                            # ── SECTION 5: Revision Method ──
+                            st.markdown('**🔄 Revision Method After Completing**')
+                            if _revision_str:
+                                st.markdown(f'> {_revision_str}')
+                            st.markdown(f'''
+- **1st Revision (After 1 day):** Re-read short notes + attempt 20 MCQs on the topic
+- **2nd Revision (After 7 days):** Active recall — close book, write key points from memory, then compare
+- **3rd Revision (After 30 days):** Rapid scan of short notes only (should take 50% less time)
+- **4th Revision (Before exam):** Quick flashcard/keyword scan — if you can't recall in 5 sec, re-read that section
+- **Error Journal Review:** After every mock test, revise ONLY the topics you got wrong
+''')
+                            
+                            st.divider()
+                            
+                            # ── SECTION 6: Proven Technique (detailed) ──
+                            st.markdown('**🔧 Proven Study Technique — How to Implement**')
+                            _tips_list = _strat_data.get('tips', [])
+                            
+                            # PYQ-based revision strategy
+                            if _s_revision_pyq:
+                                st.markdown(f'**📌 PYQ-Based Strategy:** {_s_revision_pyq}')
+                            
+                            # Tips from strategy data
+                            if _tips_list:
+                                st.markdown('**💡 Expert Tips:**')
+                                for _tip in _tips_list:
+                                    st.markdown(f'- ✅ {_tip}')
+                            
+                            # Current Affairs link
+                            _gs_paper = _strat_data.get('gs', '')
+                            if _gs_paper:
+                                st.markdown(f'**🔗 GS Paper Link:** {_gs_paper}')
             
             # ── SMART WORK TIPS (Study Target Manager) ──
             st.divider()
@@ -3223,7 +4751,7 @@ elif menu == "Study Target Manager":
                 productivity_pct=0,
                 context="target"
             )
-            st.markdown(render_smart_work_section(_sw_tips_tm, max_tips=5), unsafe_allow_html=True)
+            st.markdown(render_smart_work_section(_sw_tips_tm, max_tips=10), unsafe_allow_html=True)
 
 
 # ---------------- PRODUCTIVITY ANALYSIS ----------------
@@ -3269,7 +4797,7 @@ elif menu == "Productivity Analysis":
 
         # Keep only last 60 days for daily view
         if not df.empty:
-            cutoff_date = (date.today() - timedelta(days=60)).strftime('%Y-%m-%d')
+            cutoff_date = (get_ist_now().date() - timedelta(days=60)).strftime('%Y-%m-%d')
             df_daily = df[df['date'] >= cutoff_date].copy()
         else:
             df_daily = df.copy()
@@ -3284,7 +4812,9 @@ elif menu == "Productivity Analysis":
                     (USER,)
                 )
                 sleep_hours_dict = {}
+                sleep_intervals_dict = {}
                 powernap_dict = {}
+                hl_map = {}
                 if not hl_df.empty:
                     hl_map = {str(r['date']): r for _, r in hl_df.iterrows()}
                     for date_str in sorted(hl_map.keys()):
@@ -3298,9 +4828,14 @@ elif menu == "Productivity Analysis":
                             sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                         sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                         powernap_dict[date_str] = curr.get('powernap', 0)
+                        
+                        # Store intervals for overlap logic
+                        sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
             except:
                 sleep_hours_dict = {}
+                sleep_intervals_dict = {}
                 powernap_dict = {}
+                hl_map = {}
             
             prod_df     = df_daily[df_daily['type'].isin(ALL_PRODUCTIVE)]
             essential_df= df_daily[df_daily['type'].isin(ALL_ESSENTIAL)]
@@ -3308,7 +4843,7 @@ elif menu == "Productivity Analysis":
 
             # Metrics row
             m1, m2, m3 = st.columns(3)
-            m1.metric("Productivity %", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)}%")
+            m1.metric("Productivity %", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
             m2.metric("Study Streak",   f"{streak(df_daily)} days")
             m3.metric("Focus Score",    f"{focus_score(df_daily)}%")
 
@@ -3318,7 +4853,7 @@ elif menu == "Productivity Analysis":
             st.markdown("### 📈 Productivity Analysis")
 
             # TABLE FIRST
-            report_df = daily_report(df_daily, sleep_data=sleep_hours_dict, powernap_data=powernap_dict)
+            report_df = daily_report(df_daily, sleep_data=sleep_hours_dict, powernap_data=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
             if not report_df.empty:
                 st.markdown("**📋 Daily Performance Report Table**")
                 # Updated table prioritizing scores
@@ -3340,32 +4875,191 @@ elif menu == "Productivity Analysis":
             essential_total = essential_df['duration'].sum()
             waste_total     = waste_df['duration'].sum()
 
-            bar_df = pd.DataFrame({
-                'Type': ['Productive', 'Essential', 'Waste'],
-                'Hours': [prod_total, essential_total, waste_total]
-            })
-            col_bar, col_pie = st.columns(2)
-            with col_bar:
-                fig_bar = px.bar(bar_df, x='Type', y='Hours', color='Type',
-                                 color_discrete_map={'Productive':'#22c55e','Essential':'#3b82f6','Waste':'#ef4444'},
-                                 title="Overall Time Distribution")
-                st.plotly_chart(fig_bar, width='stretch', key="daily_bar")
-            with col_pie:
-                fig_pie = px.pie(bar_df, names='Type', values='Hours', color='Type',
-                                 color_discrete_map={'Productive':'#22c55e','Essential':'#3b82f6','Waste':'#ef4444'},
-                                 title="Time Share")
-                st.plotly_chart(fig_pie, width='stretch', key="daily_pie")
-
             # Line: Productive & Waste ONLY — Essential removed
             if not report_df.empty:
-                fig_trend = go.Figure()
-                fig_trend.add_trace(go.Scatter(x=report_df['date'], y=report_df['productive_hours'],
+                trend_df_15 = report_df.tail(15)
+                fig_trend_15 = go.Figure()
+                fig_trend_15.add_trace(go.Scatter(x=trend_df_15['date'], y=trend_df_15['productive_hours'],
                     mode='lines+markers', name='Productive', line=dict(color='#22c55e', width=3)))
-                fig_trend.add_trace(go.Scatter(x=report_df['date'], y=report_df['waste_hours'],
+                fig_trend_15.add_trace(go.Scatter(x=trend_df_15['date'], y=trend_df_15['waste_hours'],
                     mode='lines+markers', name='Waste', line=dict(color='#ef4444', width=3)))
-                fig_trend.update_layout(title="Productive vs Waste Daily Trend",
+                fig_trend_15.update_layout(title="Last 15 Days Productive vs Waste Trend",
                                         xaxis_title="Date", yaxis_title="Hours")
-                st.plotly_chart(fig_trend, width='stretch', key="daily_trend_line")
+                st.plotly_chart(fig_trend_15, width='stretch', key="daily_trend_line_15")
+                
+                trend_df_30 = report_df.tail(30)
+                fig_trend_30 = go.Figure()
+                fig_trend_30.add_trace(go.Scatter(x=trend_df_30['date'], y=trend_df_30['productive_hours'],
+                    mode='lines+markers', name='Productive', line=dict(color='#22c55e', width=3)))
+                fig_trend_30.add_trace(go.Scatter(x=trend_df_30['date'], y=trend_df_30['waste_hours'],
+                    mode='lines+markers', name='Waste', line=dict(color='#ef4444', width=3)))
+                fig_trend_30.update_layout(title="Last 30 Days Productive vs Waste Trend",
+                                        xaxis_title="Date", yaxis_title="Hours")
+                st.plotly_chart(fig_trend_30, width='stretch', key="daily_trend_line_30")
+
+            st.divider()
+            
+            # --- TOP 10 RANKINGS ---
+            st.markdown("### 🏆 Top 10 Productivity & Waste Rankings (All-Time)")
+            # Generate all-time report
+            try:
+                hl_df_all = read_sql("SELECT date, sleep_time, wakeup_time, powernap FROM health_logs WHERE username=%s ORDER BY date ASC", (USER,))
+                all_sleep_intervals_dict = {}
+                if not hl_df_all.empty:
+                    hl_map_all = {str(r['date']): r for _, r in hl_df_all.iterrows()}
+                    for date_str in sorted(hl_map_all.keys()):
+                        curr = hl_map_all[date_str]
+                        prev_date = (pd.to_datetime(date_str) - timedelta(days=1)).strftime('%Y-%m-%d')
+                        prev = hl_map_all.get(prev_date, {})
+                        all_sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+            except:
+                all_sleep_intervals_dict = {}
+                
+            all_time_report = daily_report(df, sleep_intervals_dict=all_sleep_intervals_dict)
+            
+            if not all_time_report.empty:
+                tab_days, tab_weeks, tab_months, tab_years, tab_streaks = st.tabs([
+                    "📅 Days", "📆 Weeks", "🗓️ Months", "📈 Years", "🔥 Streaks"
+                ])
+                
+                with tab_days:
+                    st.markdown("#### Top 10 Days")
+                    col_p, col_w = st.columns(2)
+                    with col_p:
+                        st.markdown("**Productive Days**")
+                        st.dataframe(get_top_periods(all_time_report, 'Day', 'productive'), hide_index=True, width='stretch')
+                    with col_w:
+                        st.markdown("**Waste Days**")
+                        st.dataframe(get_top_periods(all_time_report, 'Day', 'waste'), hide_index=True, width='stretch')
+                
+                with tab_weeks:
+                    st.markdown("#### Top 10 Weeks")
+                    col_p, col_w = st.columns(2)
+                    with col_p:
+                        st.markdown("**Productive Weeks**")
+                        st.dataframe(get_top_periods(all_time_report, 'Week', 'productive'), hide_index=True, width='stretch')
+                    with col_w:
+                        st.markdown("**Waste Weeks**")
+                        st.dataframe(get_top_periods(all_time_report, 'Week', 'waste'), hide_index=True, width='stretch')
+                        
+                with tab_months:
+                    st.markdown("#### Top 10 Months")
+                    col_p, col_w = st.columns(2)
+                    with col_p:
+                        st.markdown("**Productive Months**")
+                        st.dataframe(get_top_periods(all_time_report, 'Month', 'productive'), hide_index=True, width='stretch')
+                    with col_w:
+                        st.markdown("**Waste Months**")
+                        st.dataframe(get_top_periods(all_time_report, 'Month', 'waste'), hide_index=True, width='stretch')
+                        
+                with tab_years:
+                    st.markdown("#### Top 10 Years")
+                    col_p, col_w = st.columns(2)
+                    with col_p:
+                        st.markdown("**Productive Years**")
+                        st.dataframe(get_top_periods(all_time_report, 'Year', 'productive'), hide_index=True, width='stretch')
+                    with col_w:
+                        st.markdown("**Waste Years**")
+                        st.dataframe(get_top_periods(all_time_report, 'Year', 'waste'), hide_index=True, width='stretch')
+                        
+                with tab_streaks:
+                    st.markdown("#### Top 10 Streaks")
+                    col_p, col_w = st.columns(2)
+                    with col_p:
+                        st.markdown("**Productive Streaks**")
+                        st.dataframe(get_top_streaks(all_time_report, 'productive'), hide_index=True, width='stretch')
+                    with col_w:
+                        st.markdown("**Waste Streaks**")
+                        st.dataframe(get_top_streaks(all_time_report, 'waste'), hide_index=True, width='stretch')
+
+            st.divider()
+            st.markdown("### 📅 Day-wise Performance Trend")
+            
+            wd_prod = weekday_analysis(df_daily, ALL_PRODUCTIVE, sleep_intervals_dict=sleep_intervals_dict)
+            _all_waste_types = [t for t in df_daily['type'].unique() if t not in ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL]
+            wd_waste = weekday_analysis(df_daily, _all_waste_types, sleep_intervals_dict=sleep_intervals_dict)
+            
+            if not wd_prod.empty or not wd_waste.empty:
+                # Prepare combined dataframe
+                if not wd_prod.empty: wd_prod['Category'] = 'Productive'
+                if not wd_waste.empty: wd_waste['Category'] = 'Waste'
+                
+                wd_combined = pd.concat([df for df in [wd_prod, wd_waste] if not df.empty])
+                
+                fig_wd_combined = px.line(wd_combined, x='day_of_week', y='avg_hours', color='Category', markers=True,
+                                         title="Avg Productivity vs Waste by Weekday",
+                                         color_discrete_map={'Productive': '#22c55e', 'Waste': '#ef4444'})
+                st.plotly_chart(fig_wd_combined, width='stretch', key="weekday_combined")
+            else:
+                st.caption("Not enough data for weekday trend.")
+
+            st.divider()
+            st.markdown("### 📱 Social Media & 📞 TalkOnCall Analytics")
+            
+            # Sub-activity Trends
+            for act in ["Social Media", "TalkOnCall"]:
+                st.markdown(f"#### {act} Analysis")
+                trend_data = sub_activity_trend(df_daily, act, sleep_intervals_dict=sleep_intervals_dict)
+                if not trend_data.empty:
+                    # Date-wise multi-line graph
+                    fig_sub_date = px.line(trend_data, x='date', y='duration', color='subject', markers=True,
+                                          title=f"{act} Usage Trend (Date-wise)")
+                    st.plotly_chart(fig_sub_date, width='stretch', key=f"trend_date_{act}")
+                    
+                    # Day-wise multi-line graph
+                    trend_data['date_dt'] = pd.to_datetime(trend_data['date'])
+                    trend_data['day_of_week'] = trend_data['date_dt'].dt.day_name()
+                    days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                    
+                    # Calculate average by day of week per subject
+                    unique_dates_act = trend_data['date'].unique()
+                    counts_act = pd.Series(pd.to_datetime(unique_dates_act)).dt.day_name().value_counts().to_dict()
+                    
+                    wd_sub = trend_data.groupby(['day_of_week', 'subject'])['duration'].sum().reset_index()
+                    wd_sub['avg_hours'] = wd_sub.apply(lambda x: x['duration'] / counts_act.get(x['day_of_week'], 1), axis=1)
+                    wd_sub['day_of_week'] = pd.Categorical(wd_sub['day_of_week'], categories=days_order, ordered=True)
+                    wd_sub = wd_sub.sort_values('day_of_week')
+                    
+                    fig_sub_wd = px.line(wd_sub, x='day_of_week', y='avg_hours', color='subject', markers=True,
+                                        title=f"{act} Avg Usage (Day-wise)")
+                    st.plotly_chart(fig_sub_wd, width='stretch', key=f"trend_wd_{act}")
+                else:
+                    st.caption(f"No {act} data found.")
+
+            st.divider()
+            st.markdown("### ⚖️ Social Media vs TalkOnCall Comparison")
+            
+            # Combine both for comparison
+            sm_data = df_daily[df_daily['type'] == "Social Media"].groupby('date')['duration'].sum().reset_index()
+            tc_data = df_daily[df_daily['type'] == "TalkOnCall"].groupby('date')['duration'].sum().reset_index()
+            
+            if not sm_data.empty or not tc_data.empty:
+                sm_data['Category'] = 'Social Media'
+                tc_data['Category'] = 'TalkOnCall'
+                comp_date = pd.concat([sm_data, tc_data])
+                
+                fig_comp_date = px.line(comp_date, x='date', y='duration', color='Category', markers=True,
+                                        title="Social Media vs TalkOnCall (Date-wise)")
+                st.plotly_chart(fig_comp_date, width='stretch', key="comp_date_sm_tc")
+                
+                # Weekday comparison
+                comp_date['date_dt'] = pd.to_datetime(comp_date['date'])
+                comp_date['day_of_week'] = comp_date['date_dt'].dt.day_name()
+                
+                unique_dates_comp = comp_date['date'].unique()
+                counts_comp = pd.Series(pd.to_datetime(unique_dates_comp)).dt.day_name().value_counts().to_dict()
+                
+                wd_comp = comp_date.groupby(['day_of_week', 'Category'])['duration'].sum().reset_index()
+                wd_comp['avg_hours'] = wd_comp.apply(lambda x: x['duration'] / counts_comp.get(x['day_of_week'], 1), axis=1)
+                days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                wd_comp['day_of_week'] = pd.Categorical(wd_comp['day_of_week'], categories=days_order, ordered=True)
+                wd_comp = wd_comp.sort_values('day_of_week')
+                
+                fig_comp_wd = px.line(wd_comp, x='day_of_week', y='avg_hours', color='Category', markers=True,
+                                     title="Social Media vs TalkOnCall (Day-wise Avg)")
+                st.plotly_chart(fig_comp_wd, width='stretch', key="comp_wd_sm_tc")
+            else:
+                st.caption("Not enough data for comparison.")
 
             import ai as _ai_d
             
@@ -3389,7 +5083,7 @@ elif menu == "Productivity Analysis":
                 st.metric("⚠️ Waste Hours", f"{waste_total:.1f}h",
                          delta=f"{(waste_total/(prod_total+essential_total+waste_total)*100) if (prod_total+essential_total+waste_total)>0 else 0:.0f}%")
             with sum_col4:
-                st.metric("🎯 Overall Score", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict):.0f}%",
+                st.metric("🎯 Overall Score", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, sleep_intervals_dict=sleep_intervals_dict):.0f}%",
                          delta=f"Streak: {streak(df_daily)}d")
             
             # Time Allocation Analysis
@@ -3614,21 +5308,7 @@ elif menu == "Productivity Analysis":
                 else:
                     st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
 
-                # ── SMART WORK TIPS (Productivity Analysis — Daily Tab) ──
-                _sw_streak_pa = streak(df_daily)
-                _sw_focus_pa = focus_score(df_daily)
-                _sw_prod_pct_pa = productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)
-                _sw_tips_pa = generate_smart_work_tips(
-                    prod_hours=prod_total,
-                    waste_hours=waste_total,
-                    essential_hours=essential_total,
-                    study_streak=_sw_streak_pa,
-                    focus_pct=_sw_focus_pa,
-                    subject_count=len(prod_df['subject'].unique()) if not prod_df.empty else 0,
-                    productivity_pct=_sw_prod_pct_pa,
-                    context="productivity"
-                )
-                st.markdown(render_smart_work_section(_sw_tips_pa, max_tips=6), unsafe_allow_html=True)
+
 
 
 
@@ -3831,6 +5511,7 @@ elif menu == "Productivity Analysis":
                         (USER,)
                     )
                     sleep_hours_dict = {}
+                    sleep_intervals_dict = {}
                     powernap_dict = {}
                     if not hl_df.empty:
                         hl_map = {str(r['date']): r for _, r in hl_df.iterrows()}
@@ -3845,8 +5526,10 @@ elif menu == "Productivity Analysis":
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
+                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
                 except:
                     sleep_hours_dict = {}
+                    sleep_intervals_dict = {}
                     powernap_dict = {}
                 
                 prod_m      = month_df[month_df['type'].isin(ALL_PRODUCTIVE)]
@@ -3857,14 +5540,14 @@ elif menu == "Productivity Analysis":
                 pm1.metric("Productive Hrs", f"{round(prod_m['duration'].sum(),1)}h")
                 pm2.metric("Essential Hrs",  f"{round(essential_m['duration'].sum(),1)}h")
                 pm3.metric("Waste Hrs",      f"{round(waste_m['duration'].sum(),1)}h")
-                pm4.metric("Productivity %", f"{productivity_score(month_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)}%")
+                pm4.metric("Productivity %", f"{productivity_score(month_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
 
                 st.divider()
 
                 # ── PRODUCTIVITY ANALYSIS ────────────────────────────────────
                 st.markdown("### 📈 Productivity Analysis")
 
-                daily_m = daily_report(month_df, sleep_data=sleep_hours_dict, powernap_data=powernap_dict)
+                daily_m = daily_report(month_df, sleep_data=sleep_hours_dict, powernap_data=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
                 if not daily_m.empty:
                     st.markdown("**📋 Day-by-Day Table**")
                     st.dataframe(daily_m[['date','productive_hours','essential_hours','waste_hours','sleep_hours','powernap','productivity_%']],
@@ -4186,6 +5869,7 @@ elif menu == "Productivity Analysis":
                         (USER,)
                     )
                     sleep_hours_dict = {}
+                    sleep_intervals_dict = {}
                     powernap_dict = {}
                     if not hl_df.empty:
                         hl_map = {str(r['date']): r for _, r in hl_df.iterrows()}
@@ -4200,8 +5884,10 @@ elif menu == "Productivity Analysis":
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
+                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
                 except:
                     sleep_hours_dict = {}
+                    sleep_intervals_dict = {}
                     powernap_dict = {}
                 
                 prod_y      = year_df[year_df['type'].isin(ALL_PRODUCTIVE)]
@@ -4212,7 +5898,7 @@ elif menu == "Productivity Analysis":
                 py1.metric("Productive Hrs", f"{round(prod_y['duration'].sum(),1)}h")
                 py2.metric("Essential Hrs",  f"{round(essential_y['duration'].sum(),1)}h")
                 py3.metric("Waste Hrs",      f"{round(waste_y['duration'].sum(),1)}h")
-                py4.metric("Productivity %", f"{productivity_score(year_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)}%")
+                py4.metric("Productivity %", f"{productivity_score(year_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
 
                 st.divider()
 
@@ -4225,9 +5911,8 @@ elif menu == "Productivity Analysis":
                     if mdata.empty:
                         month_rows.append({'Month': mlabel, 'Productive': 0, 'Essential': 0, 'Waste': 0})
                     else:
-                        mp = mdata[mdata['type'].isin(ALL_PRODUCTIVE)]['duration'].sum()
-                        me = mdata[mdata['type'].isin(ALL_ESSENTIAL)]['duration'].sum()
-                        mw = mdata[~mdata['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]['duration'].sum()
+                        # Use helper for sleep-adjusted sums
+                        mp, me, mw = get_adjusted_sums(mdata, sleep_intervals_dict)
                         month_rows.append({'Month': mlabel, 'Productive': round(mp,1),
                                            'Essential': round(me,1), 'Waste': round(mw,1)})
                 yr_monthly_df = pd.DataFrame(month_rows)
@@ -4389,6 +6074,24 @@ elif menu == "Productivity Analysis":
 
                     st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
 
+    if not df_daily.empty:
+        st.divider()
+        # ── SMART WORK TIPS (Productivity Analysis) ──
+        _sw_streak_pa = streak(df_daily)
+        _sw_focus_pa = focus_score(df_daily)
+        _sw_prod_pct_pa = productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+        _sw_tips_pa = generate_smart_work_tips(
+            prod_hours=prod_total,
+            waste_hours=waste_total,
+            essential_hours=essential_total,
+            study_streak=_sw_streak_pa,
+            focus_pct=_sw_focus_pa,
+            subject_count=len(prod_df['subject'].unique()) if not prod_df.empty else 0,
+            productivity_pct=_sw_prod_pct_pa,
+            context="productivity"
+        )
+        st.markdown(render_smart_work_section(_sw_tips_pa, max_tips=12), unsafe_allow_html=True)
+
 elif menu == "Ask Esu":
     # Pre-load saved responses from database
     if "saved_esu_responses_db" not in st.session_state:
@@ -4475,9 +6178,36 @@ elif menu == "Ask Esu":
             context="ask_esu"
         )
         with st.expander("⚡ Smart Work Tips & Strategies", expanded=False):
-            st.markdown(render_smart_work_section(_sw_tips_esu, max_tips=8), unsafe_allow_html=True)
+            st.markdown(render_smart_work_section(_sw_tips_esu, max_tips=15), unsafe_allow_html=True)
         
-        # ── Question Input ──
+        # ── Question Input & Type ──
+        type_col, subj_col = st.columns([1, 2])
+        with type_col:
+            esu_query_type = st.selectbox(
+                "🎯 Query Type",
+                ["General Query", "Subject Wise Strategy"],
+                help="General Query uses smart detection. Subject Wise allows you to pick specific subjects for detailed analysis.",
+                key="esu_query_type"
+            )
+        
+        selected_subj_keys = []
+        if esu_query_type == "Subject Wise Strategy":
+            with subj_col:
+                # Get subject display names for the pills
+                subj_options = {k: v['name'] for k, v in _ai_esu.ALL_SUBJECTS.items()}
+                selected_subj_names = st.pills(
+                    "📚 Select Subjects for Detailed Strategy",
+                    options=list(subj_options.values()),
+                    selection_mode="multi",
+                    help="Pick 1-5 subjects. Esu will provide full detailed strategy tables for these.",
+                    key="esu_selected_subjects"
+                )
+                # Map back to keys
+                selected_subj_keys = [k for k, v in subj_options.items() if v in selected_subj_names]
+        else:
+            with subj_col:
+                st.info("💡 Esu will automatically detect relevant subjects from your question.")
+
         col1, col2 = st.columns([3, 1])
         
         with col1:
@@ -4495,7 +6225,8 @@ elif menu == "Ask Esu":
                 key="esu_exam_date"
             )
             if exam_date:
-                days_left = (exam_date - pd.Timestamp.now().date()).days
+                from database import get_ist_now
+                days_left = (exam_date - get_ist_now().date()).days
                 st.markdown(f"""
                 <div style="background: #1e293b; padding: 10px; border-radius: 10px; border: 1px solid #334155; text-align: center;">
                     <div style="font-size: 24px; font-weight: 800; color: {'#f87171' if days_left < 30 else '#38bdf8'};">{days_left}</div>
@@ -4509,24 +6240,31 @@ elif menu == "Ask Esu":
                 st.warning("Please enter a question or request for Esu!")
             else:
                 with st.spinner("🤔 Esu is thinking..."):
-                    # Prepare ULTRA-LEAN context to minimize tokens
-                    context = f"Study:{prod_total_esu:.0f}h | Work:{essential_total_esu:.0f}h | Waste:{waste_total_esu:.0f}h"
-                    
-                    # Add exam timeline if set
+                    # Context: only exam date (all tokens prioritized for UPSC strategy)
+                    context = ""
                     if exam_date:
-                        context += f" | Exam:{exam_date.strftime('%b %d, %Y')} ({days_left}d left)"
+                        context = f"Exam: {exam_date.strftime('%b %d, %Y')} ({days_left} days left)"
                     
-                    # Build MINIMAL PYQ context — only top 3 subjects, no verbose details
+                    # Build COMPREHENSIVE PYQ context — ALL subjects with full details
+                    # Sorted by importance (highest priority first)
                     pyq_context = ""
                     if pyq_data_prelims:
-                        top3 = pyq_data_prelims[:3]
-                        pyq_context = "Top PYQ: " + ", ".join(
-                            f"{s['subject']}({s['importance_score']}/100)" for s in top3
-                        )
+                        sorted_pyq = sorted(pyq_data_prelims, key=lambda x: x.get('importance_score', 0), reverse=True)
+                        pyq_lines = []
+                        for i, s in enumerate(sorted_pyq):
+                            name = s.get('subject', '')
+                            score = s.get('importance_score', 0)
+                            topics = s.get('important_topics', '')[:120]
+                            chapters = s.get('important_chapters', '')[:100]
+                            strategy = s.get('revision_strategy', '')[:80]
+                            pyq_lines.append(
+                                f"{i+1}. {name}({score}/100) | Topics: {topics} | Ch: {chapters} | Rev: {strategy}"
+                            )
+                        pyq_context = "\n".join(pyq_lines)
                     
                     # Call AI with smart context injection
                     try:
-                        esu_response = _ai_esu.ask_esu(user_prompt, context, pyq_context)
+                        esu_response = _ai_esu.ask_esu(user_prompt, context, pyq_context, selected_subjects=selected_subj_keys)
                         st.session_state["esu_response"] = esu_response
                         st.session_state["esu_last_question"] = user_prompt
                     except Exception as e:
@@ -4565,27 +6303,16 @@ elif menu == "Ask Esu":
                     st.session_state["esu_response"] = None
                     st.rerun()
             with col_resp2:
-                if st.button("🗑️ Delete Response", key="esu_delete"):
-                    st.session_state["confirm_esu_delete"] = True
+                if st.button("❌ Cancel / Clear", key="esu_cancel_clear"):
+                    st.session_state["esu_response"] = None
+                    st.session_state["esu_prompt"] = "" # Also clear the prompt
+                    st.toast("🗑️ Response cleared.")
+                    st.rerun()
             with col_resp3:
                 if st.button("🔄 New Question", key="esu_new"):
                     st.session_state["esu_response"] = None
-                    st.session_state["esu_prompt"] = ""
                     st.rerun()
             
-            if st.session_state.get("confirm_esu_delete", False):
-                st.warning("Delete this response?")
-                del_col1, del_col2 = st.columns(2)
-                with del_col1:
-                    if st.button("✅ Yes, Delete", key="esu_confirm_delete"):
-                        st.session_state["esu_response"] = None
-                        st.session_state["confirm_esu_delete"] = False
-                        st.success("Response deleted.")
-                        st.rerun()
-                with del_col2:
-                    if st.button("❌ Cancel", key="esu_cancel_delete"):
-                        st.session_state["confirm_esu_delete"] = False
-                        st.rerun()
         
         # Display saved responses from database
         saved_db = st.session_state.get("saved_esu_responses_db", [])
@@ -4617,6 +6344,8 @@ elif menu == "Ask Esu":
             for saved in saved_db:
                 resp_id = saved['id']
                 with st.expander(f"📌 {saved['question'][:60]}... | {saved['timestamp'].strftime('%b %d, %H:%M')}"):
+                    st.markdown(f"**🗣️ Question:** {saved['question']}")
+                    st.divider()
                     st.markdown(saved['response'])
                     if st.button("🗑️ Delete", key=f"del_saved_db_{resp_id}"):
                         delete_esu_response(resp_id, USER)
@@ -4635,16 +6364,19 @@ elif menu == "Expenses":
     df_full = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
     df_full = df_full[df_full['amount'] > 0]
 
-    # Keep only last 60 days for expense view
+    # Keep only last 60 days for delete management view to prevent page lag
     if not df_full.empty:
-        cutoff_date = (date.today() - timedelta(days=60)).strftime('%Y-%m-%d')
+        cutoff_date = (get_ist_now().date() - timedelta(days=60)).strftime('%Y-%m-%d')
         df = df_full[df_full['date'] >= cutoff_date].copy()
     else:
         df = df_full.copy()
 
     if not df_full.empty:
+        df_full['year_str'] = pd.to_datetime(df_full['date']).dt.strftime('%Y')
         df_full['month_str'] = pd.to_datetime(df_full['date']).dt.strftime('%Y-%m')
-        current_month_str = date.today().strftime('%Y-%m')
+        
+        current_year_str = get_ist_now().date().strftime('%Y')
+        current_month_str = get_ist_now().date().strftime('%Y-%m')
         current_month_exp = df_full[df_full['month_str'] == current_month_str]['amount'].sum()
         current_month_cats = df_full[df_full['month_str'] == current_month_str]['type'].nunique()
 
@@ -4652,24 +6384,71 @@ elif menu == "Expenses":
         e1.metric(f"Current Month Expenses ({current_month_str})", f"₹{round(current_month_exp, 2)}")
         e2.metric("Categories (Current Month)", f"{current_month_cats}")
 
+        # Month-wise Expenses
         st.markdown("### 📅 Month-wise Expenses")
         month_wise_exp = df_full.groupby('month_str')['amount'].sum().reset_index().sort_values('month_str', ascending=False)
         st.dataframe(month_wise_exp.rename(columns={'month_str': 'Month', 'amount': 'Total Expense (₹)'}), width='stretch', hide_index=True)
 
-        st.markdown("### 🔍 Category Breakdown by Month")
-        selected_month = st.selectbox("Select Month", month_wise_exp['month_str'].tolist())
-        if selected_month:
-            month_df = df_full[df_full['month_str'] == selected_month]
-            month_exp_grp = month_df.groupby('type')['amount'].sum().sort_values(ascending=False)
+        # Year-wise Expenses
+        st.markdown("### 📅 Year-wise Expenses")
+        year_wise_exp = df_full.groupby('year_str')['amount'].sum().reset_index().sort_values('year_str', ascending=False)
+        st.dataframe(year_wise_exp.rename(columns={'year_str': 'Year', 'amount': 'Total Expense (₹)'}), width='stretch', hide_index=True)
+
+        # Date-wise Breakdown
+        st.markdown("### 📅 Date-wise Expense Breakdown")
+        date_breakdown_df = df_full[['date', 'type', 'subject', 'chapter', 'amount']].copy()
+        date_breakdown_df = date_breakdown_df.rename(columns={
+            'date': 'Date',
+            'type': 'Category',
+            'subject': 'Subject',
+            'chapter': 'Description/Details',
+            'amount': 'Amount (₹)'
+        }).sort_values('Date', ascending=False)
+        st.dataframe(date_breakdown_df, width='stretch', hide_index=True)
+
+        # Category breakdown by Year & Month
+        st.markdown("### 🔍 Category Breakdown")
+        
+        col_yr, col_mn = st.columns(2)
+        with col_yr:
+            selected_year = st.selectbox("Select Year", year_wise_exp['year_str'].tolist(), key="cat_breakdown_year")
+            
+        if selected_year:
+            year_df = df_full[df_full['year_str'] == selected_year].copy()
+            year_df['month_num'] = pd.to_datetime(year_df['date']).dt.month
+            
+            import calendar as _cal
+            available_months = sorted(year_df['month_num'].unique())
+            month_options = ["All Months"] + [_cal.month_name[m] for m in available_months]
+            
+            with col_mn:
+                selected_month_name = st.selectbox("Select Month", month_options, key="cat_breakdown_month")
+            
+            if selected_month_name != "All Months":
+                month_idx = list(_cal.month_name).index(selected_month_name)
+                filtered_df = year_df[year_df['month_num'] == month_idx]
+                title_suffix = f"{selected_month_name} {selected_year}"
+            else:
+                filtered_df = year_df
+                title_suffix = f"{selected_year}"
+                
+            exp_grp = filtered_df.groupby('type')['amount'].sum().sort_values(ascending=False).reset_index()
             
             col_eb, col_ep = st.columns(2)
             with col_eb:
-                st.dataframe(month_exp_grp.reset_index().rename(columns={'type':'Category', 'amount':'Amount (₹)'}), width='stretch', hide_index=True)
+                st.dataframe(exp_grp.rename(columns={'type':'Category', 'amount':'Amount (₹)'}), width='stretch', hide_index=True)
             with col_ep:
-                fig_ep = px.pie(month_exp_grp.reset_index(), names='type', values='amount',
-                                title=f"Expense Distribution ({selected_month})",
+                fig_ep = px.pie(exp_grp, names='type', values='amount',
+                                title=f"Expense Distribution ({title_suffix})",
                                 color_discrete_sequence=px.colors.qualitative.Set3)
-                st.plotly_chart(fig_ep, width='stretch', key="expenses_pie_monthly")
+                fig_ep.update_traces(
+                    textinfo='percent+value',
+                    texttemplate='₹%{value:,.2f}<br>%{percent:.1%}',
+                    hovertemplate="%{label}<br>Amount: ₹%{value:,.2f}<br>Percentage: %{percent:.1%}<extra></extra>"
+                )
+                st.plotly_chart(fig_ep, width='stretch', key=f"expenses_pie_{selected_year}_{selected_month_name}")
+
+
 
         # Variables needed for 60-day summary below
         if not df.empty:
@@ -4705,6 +6484,14 @@ elif menu == "Expenses":
                            labels={'hour_label': 'Hour', 'amount': 'Amount (₹)'},
                            color_discrete_sequence=['#f59e0b'])
             st.plotly_chart(fig_h, width='stretch', key="exp_hourly_line")
+            
+            if st.checkbox("Show trend for all activities (Category-wise)", key="exp_hour_all_activities"):
+                h_cat_exp = df_exp.dropna(subset=['hour']).groupby(['hour', 'type'])['amount'].sum().reset_index()
+                h_cat_exp['hour_label'] = h_cat_exp['hour'].apply(lambda h: f"{h:02d}:00")
+                fig_h_cat = px.line(h_cat_exp, x='hour_label', y='amount', color='type', markers=True,
+                               title="Hourly Expense Trend by Category",
+                               labels={'hour_label': 'Hour', 'amount': 'Amount (₹)', 'type': 'Category'})
+                st.plotly_chart(fig_h_cat, width='stretch', key="exp_hourly_trend_cat")
         else:
             st.caption("No hourly data available.")
 
@@ -4716,84 +6503,99 @@ elif menu == "Expenses":
                        labels={'day_name': 'Day', 'amount': 'Amount (₹)'},
                        color_discrete_sequence=['#3b82f6'])
         st.plotly_chart(fig_d, width='stretch', key="exp_daywise_line")
+        
+        if st.checkbox("Show trend for all activities (Category-wise)", key="exp_daywise_all_activities"):
+            d_cat_exp = df_exp.groupby(['day_name', 'type'])['amount'].sum().reset_index()
+            # To ensure the order is correct, we can convert day_name to categorical
+            d_cat_exp['day_name'] = pd.Categorical(d_cat_exp['day_name'], categories=days_order, ordered=True)
+            d_cat_exp = d_cat_exp.sort_values('day_name')
+            fig_d_cat = px.line(d_cat_exp, x='day_name', y='amount', color='type', markers=True,
+                           title="Expenses by Day of Week by Category",
+                           labels={'day_name': 'Day', 'amount': 'Amount (₹)', 'type': 'Category'})
+            st.plotly_chart(fig_d_cat, width='stretch', key="exp_daywise_trend_cat")
 
-        # 3. Daily Trend (requested as 'month-wise' date trend)
-        st.markdown("#### 📆 Daily Trend (Month-wise Resolution)")
+        # 3. Daily Trend
+        st.markdown("#### 📆 Daily Trend")
         daily_exp = df.groupby('date')['amount'].sum().reset_index().sort_values('date')
         fig_daily = px.line(daily_exp, x='date', y='amount', markers=True,
                            title="Daily Expense Trend",
                            labels={'date': 'Date', 'amount': 'Amount (₹)'},
                            color_discrete_sequence=['#10b981'])
         st.plotly_chart(fig_daily, width='stretch', key="exp_daily_trend")
+        
+        if st.checkbox("Show trend for all activities (Category-wise)", key="exp_daily_all_activities"):
+            daily_cat_exp = df_exp.groupby(['date', 'type'])['amount'].sum().reset_index().sort_values('date')
+            fig_daily_cat = px.line(daily_cat_exp, x='date', y='amount', color='type', markers=True,
+                               title="Daily Expense Trend by Category",
+                               labels={'date': 'Date', 'amount': 'Amount (₹)', 'type': 'Category'})
+            st.plotly_chart(fig_daily_cat, width='stretch', key="exp_daily_trend_cat")
 
-        # 4. Monthly Trend (requested as 'year-wise' month trend)
-        st.markdown("#### 📊 Monthly Trend (Year-wise Resolution)")
-        m_exp = df_exp.groupby('month_str')['amount'].sum().reset_index().sort_values('month_str')
-        fig_m = px.line(m_exp, x='month_str', y='amount', markers=True,
-                       title="Monthly Expense Trend",
-                       labels={'month_str': 'Month', 'amount': 'Amount (₹)'},
+        # 3.5 Monthly Trend
+        st.markdown("#### 📅 Monthly Trend")
+        monthly_exp = df_exp.groupby('month_str')['amount'].sum().reset_index().sort_values('month_str')
+        fig_monthly = px.line(monthly_exp, x='month_str', y='amount', markers=True,
+                             title="Monthly Expense Trend (Overall)",
+                             labels={'month_str': 'Month', 'amount': 'Amount (₹)'},
+                             color_discrete_sequence=['#f59e0b'])
+        st.plotly_chart(fig_monthly, width='stretch', key="exp_monthly_trend_overall")
+
+        show_all_activities = st.checkbox("Show trend for all activities (Category-wise)", key="exp_month_all_activities")
+        if show_all_activities:
+            month_cat_trend = df_exp.groupby(['month_str', 'type'])['amount'].sum().reset_index().sort_values('month_str')
+            fig_monthly_cat = px.line(month_cat_trend, x='month_str', y='amount', color='type', markers=True,
+                                     title="Monthly Expense Trend by Category",
+                                     labels={'month_str': 'Month', 'amount': 'Amount (₹)', 'type': 'Category'})
+            st.plotly_chart(fig_monthly_cat, width='stretch', key="exp_monthly_trend_cat")
+
+        # 4. Yearly Trend
+        st.markdown("#### 📊 Yearly Trend")
+        y_trend = df_exp.groupby('year')['amount'].sum().reset_index().sort_values('year')
+        fig_y = px.line(y_trend, x='year', y='amount', markers=True,
+                       title="Yearly Expense Trend",
+                       labels={'year': 'Year', 'amount': 'Amount (₹)'},
                        color_discrete_sequence=['#8b5cf6'])
-        st.plotly_chart(fig_m, width='stretch', key="exp_monthly_trend")
+        st.plotly_chart(fig_y, width='stretch', key="exp_yearly_trend")
+        
+        if st.checkbox("Show trend for all activities (Category-wise)", key="exp_year_all_activities"):
+            y_cat_trend = df_exp.groupby(['year', 'type'])['amount'].sum().reset_index().sort_values('year')
+            fig_y_cat = px.line(y_cat_trend, x='year', y='amount', color='type', markers=True,
+                           title="Yearly Expense Trend by Category",
+                           labels={'year': 'Year', 'amount': 'Amount (₹)', 'type': 'Category'})
+            st.plotly_chart(fig_y_cat, width='stretch', key="exp_yearly_trend_cat")
 
         # Expense Summary Analysis
         st.divider()
-        st.markdown("### 📊 Expense Analysis Summary (All Time)")
+        st.markdown(f"### 📊 Expense Analysis Summary ({current_year_str})")
+        
+        df_yearly = df_full[df_full['year_str'] == current_year_str]
         
         exp_stats_col1, exp_stats_col2, exp_stats_col3, exp_stats_col4 = st.columns(4)
         
-        total_exp_full = df_full['amount'].sum()
+        total_exp_yearly = df_yearly['amount'].sum()
         
         with exp_stats_col1:
-            st.metric("Total Expenses", f"₹{total_exp_full:.0f}")
+            st.metric("Total Expenses", f"₹{total_exp_yearly:.0f}")
         with exp_stats_col2:
-            avg_exp = df_full['amount'].mean()
+            avg_exp = df_yearly['amount'].mean()
             st.metric("Average Expense", f"₹{avg_exp:.0f}" if pd.notna(avg_exp) else "₹0")
         with exp_stats_col3:
-            full_exp_grp = df_full.groupby('type')['amount'].sum().sort_values(ascending=False)
-            max_category = full_exp_grp.idxmax() if not full_exp_grp.empty else "N/A"
-            max_amount = full_exp_grp.max() if not full_exp_grp.empty else 0
+            yearly_exp_grp = df_yearly.groupby('type')['amount'].sum().sort_values(ascending=False)
+            max_category = yearly_exp_grp.idxmax() if not yearly_exp_grp.empty else "N/A"
+            max_amount = yearly_exp_grp.max() if not yearly_exp_grp.empty else 0
             st.metric("Highest Category", max_category, f"₹{max_amount:.0f}")
         with exp_stats_col4:
-            day_grp = df_full.groupby('date')['amount'].sum()
+            day_grp = df_yearly.groupby('date')['amount'].sum()
             highest_day = day_grp.idxmax() if not day_grp.empty else "N/A"
             highest_day_amount = day_grp.max() if not day_grp.empty else 0
             st.metric("Highest Spending Day", str(highest_day), f"₹{highest_day_amount:.0f}")
         
-        # Category breakdown
-        st.markdown("**Category Breakdown:**")
-        exp_breakdown_col1, exp_breakdown_col2 = st.columns(2)
-        with exp_breakdown_col1:
-            for category, amount in full_exp_grp.items():
-                pct = (amount / total_exp_full) * 100 if total_exp_full > 0 else 0
-                st.markdown(f"- **{category}**: ₹{amount:.0f} ({pct:.1f}%)")
-        with exp_breakdown_col2:
-            # Daily average
-            daily_avg = df_full.groupby('date')['amount'].sum().mean()
-            st.info(f"📆 **Daily Average**: ₹{daily_avg:.0f}/day" if pd.notna(daily_avg) else "📆 **Daily Average**: ₹0/day")
+        # Daily average
+        daily_avg = df_yearly.groupby('date')['amount'].sum().mean()
+        st.info(f"📆 **Daily Average**: ₹{daily_avg:.0f}/day" if pd.notna(daily_avg) else "📆 **Daily Average**: ₹0/day")
         
         st.info("💡 Use the **Ask Esu** page to get personalized expense optimization and budgeting strategies.")
 
-        st.divider()
-        st.subheader("Manage Expenses")
-        for _, row in df.iterrows():
-            cols = st.columns([4, 1, 1, 1])
-            with cols[0]:
-                st.write(f"{row['date']} | {row['type']} | ₹{row['amount']}")
-            with cols[1]:
-                if st.button("Delete", key=f"del_exp_{row['id']}"):
-                    st.session_state[f"confirm_exp_{row['id']}"] = True
 
-            if st.session_state.get(f"confirm_exp_{row['id']}", False):
-                with cols[2]:
-                    if st.button("Yes", key=f"yes_exp_{row['id']}"):
-                        c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (row['id'], USER))
-                        conn.commit()
-                        st.session_state[f"confirm_exp_{row['id']}"] = False
-                        st.rerun()
-                with cols[3]:
-                    if st.button("No", key=f"no_exp_{row['id']}"):
-                        st.session_state[f"confirm_exp_{row['id']}"] = False
-                        st.rerun()
     else:
         st.info("No expenses recorded yet.")
 
