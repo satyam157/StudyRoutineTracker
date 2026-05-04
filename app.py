@@ -2845,60 +2845,357 @@ elif menu == "Study Target Manager":
                 avg_hours = total_study_hours / num_subjects if num_subjects > 0 else 0
                 st.metric("📊 Average per Subject", f"{avg_hours:.1f}h")
             
-            # Weak vs Strong comparison
-            st.markdown("### 🔍 Subject Performance Breakdown")
+            # ════════════════════════════════════════════════════════════════
+            # SMART STUDY TECHNIQUES & METHODS — UPSC CSE Focused
+            # ════════════════════════════════════════════════════════════════
+            st.divider()
             
-            # Initialize variables
-            weakest_subject = subj_hours.index[0] if num_subjects >= 1 else None
-            weakest_hours = subj_hours.iloc[0] if num_subjects >= 1 else 0
-            strongest_subject = subj_hours.index[-1] if num_subjects >= 1 else None
-            strongest_hours = subj_hours.iloc[-1] if num_subjects >= 1 else 0
+            # Load PYQ data for subject-technique mapping
+            import json as _json_tm
+            try:
+                with open('pyq_data.json', 'r') as _f_tm:
+                    _pyq_tm = _json_tm.load(_f_tm)
+                    _prelims_subjects = _pyq_tm.get('prelims', [])
+                    _mains_subjects = _pyq_tm.get('mains', [])
+            except Exception:
+                _prelims_subjects = []
+                _mains_subjects = []
             
-            if num_subjects >= 2:
-                comp_col1, comp_col2 = st.columns(2)
+            # Build subject importance map
+            _subj_importance = {}
+            for s in _prelims_subjects:
+                _subj_importance[s['subject']] = {
+                    'score': s['importance_score'],
+                    'topics': s['important_topics'],
+                    'chapters': s['important_chapters'],
+                    'strategy': s['revision_strategy']
+                }
+            
+            st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a5f 100%);
+                padding: 24px 28px 16px 28px; border-radius: 16px;
+                border: 1px solid #4f46e5; margin-bottom: 20px;
+                box-shadow: 0 8px 32px rgba(79, 70, 229, 0.15);
+            ">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                    <span style="font-size: 28px;">📚</span>
+                    <h2 style="margin: 0; color: #e0e7ff; font-weight: 800;">Smart Study Techniques & Methods</h2>
+                </div>
+                <p style="margin: 0; color: #a5b4fc; font-size: 14px;">
+                    Proven study & productivity techniques mapped to your UPSC subjects based on PYQ trends and syllabus weight.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # ── TAB LAYOUT ──
+            _tech_tab1, _tech_tab2, _tech_tab3 = st.tabs([
+                "🧠 Study Techniques", "⚡ Productivity Methods", "🎯 Subject-wise Strategy"
+            ])
+            
+            # ═══════════════════════════════════════════
+            # TAB 1 — STUDY TECHNIQUES
+            # ═══════════════════════════════════════════
+            with _tech_tab1:
+                st.markdown("""
+                <div style="background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 18px 22px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; color: #94a3b8; margin-bottom: 8px;">💡 Each technique below has been mapped to specific UPSC subjects where it works best.</div>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                with comp_col1:
-                    st.error(f"""
-                    ⚠️ **Weakest Subject**: {weakest_subject}
-                    
-                    Hours Logged: {weakest_hours:.1f}h
-                    
-                    This subject needs more attention and focused study sessions.
-                    """)
+                _study_techniques = [
+                    {
+                        "name": "Active Recall",
+                        "icon": "🧠",
+                        "what": "Close the book and write/speak everything you remember. Then check gaps.",
+                        "how": "After reading 1 chapter, close it. Write all key points from memory on blank paper. Compare with book — your gaps are your weak spots.",
+                        "when": "Every study session — spend last 15 min of each hour on recall.",
+                        "subjects": "**Polity** (Articles, Amendments), **History** (Dates, Movements), **Economics** (Concepts, Data)",
+                        "impact": "3x better retention than re-reading. Builds neural pathways for exam recall under pressure.",
+                        "color": "#8b5cf6"
+                    },
+                    {
+                        "name": "Spaced Repetition",
+                        "icon": "📆",
+                        "what": "Revise at increasing intervals: Day 1 → Day 3 → Day 7 → Day 21 → Day 45.",
+                        "how": "After completing a chapter, mark revision dates in calendar. Use Anki flashcards for facts. Keep a 'Revision Register' with dates.",
+                        "when": "Daily 30-min revision slot (morning or before sleep). Sunday = full revision day.",
+                        "subjects": "**All subjects** — especially fact-heavy: **Environment** (species, acts), **Geography** (data, maps), **Current Affairs**",
+                        "impact": "Without this, you forget 80% in 7 days. With it, you retain 90%+ for months.",
+                        "color": "#06b6d4"
+                    },
+                    {
+                        "name": "Feynman Technique",
+                        "icon": "📝",
+                        "what": "Explain the topic as if teaching a 10-year-old. Where you struggle = where you don't understand.",
+                        "how": "Pick a topic (e.g., 'Separation of Powers'). Write a 5-line explanation in simple Hindi/English. If you can't simplify it, re-study that part.",
+                        "when": "2 topics/day. Best done during evening revision sessions.",
+                        "subjects": "**Polity** (Constitutional concepts), **Economics** (Fiscal/Monetary policy), **Ethics** (case studies)",
+                        "impact": "Converts surface-level reading into deep understanding. Essential for Mains answer writing.",
+                        "color": "#f59e0b"
+                    },
+                    {
+                        "name": "Mind Mapping",
+                        "icon": "🗺️",
+                        "what": "Create visual diagrams connecting related concepts, chapters, and themes.",
+                        "how": "Central topic in middle → branches for sub-topics → leaves for facts/dates. Use colors for different categories. One A4 sheet per chapter.",
+                        "when": "After completing a subject/unit. Revise using maps instead of full chapters.",
+                        "subjects": "**History** (connect movements, leaders, dates), **Geography** (physical features, climate), **Environment** (ecosystem linkages)",
+                        "impact": "Visual memory is 6x stronger. Mind maps compress 50 pages into 1 page for quick revision.",
+                        "color": "#10b981"
+                    },
+                    {
+                        "name": "PYQ-First Approach",
+                        "icon": "📋",
+                        "what": "Study Previous Year Questions BEFORE reading the chapter. Know what UPSC asks, then study accordingly.",
+                        "how": "Download last 10 years PYQs topic-wise. Before starting any chapter, solve its PYQs. Mark which topics repeat. Study those FIRST.",
+                        "when": "Before starting each new chapter/topic. Weekly PYQ practice sessions.",
+                        "subjects": "**All subjects** — Prelims PYQ trends: Polity (96/100), History (95/100), Geography (92/100), Economics (88/100)",
+                        "impact": "80% of Prelims questions come from 20% of topics. PYQ analysis reveals those 20%.",
+                        "color": "#ef4444"
+                    },
+                    {
+                        "name": "SQ3R Method",
+                        "icon": "📖",
+                        "what": "Survey → Question → Read → Recite → Review. Structured reading method for textbooks.",
+                        "how": "**Survey**: Scan headings for 2 min. **Question**: Convert headings to questions. **Read**: Read to answer your questions. **Recite**: Close book, answer. **Review**: Summarize in notes.",
+                        "when": "Every time you open NCERT, Laxmikanth, or any standard book.",
+                        "subjects": "**NCERT 6-12** (all subjects), **Laxmikanth** (Polity), **Spectrum** (History), **Shankar IAS** (Environment)",
+                        "impact": "Prevents passive reading. Forces comprehension. Ideal for first-time reading of any textbook.",
+                        "color": "#6366f1"
+                    },
+                    {
+                        "name": "Answer Writing Practice",
+                        "icon": "✍️",
+                        "what": "Write 2-3 Mains-style answers daily. Structure: Intro → Body (points + examples) → Conclusion.",
+                        "how": "Pick a PYQ or mock question. Set 7-minute timer for 150-word answer. Use diagrams, flowcharts where possible. Get evaluated weekly.",
+                        "when": "Daily 30-45 min. Start from Day 1 of preparation — don't wait for 'completion'.",
+                        "subjects": "**GS1** (History, Geography, Society), **GS2** (Polity, IR, Governance), **GS3** (Economy, Environment, Security), **GS4** (Ethics)",
+                        "impact": "Mains = 1750 marks. Without daily writing, you can't finish papers in time. Start early, improve fast.",
+                        "color": "#ec4899"
+                    },
+                ]
                 
-                with comp_col2:
-                    st.success(f"""
-                    ✅ **Strongest Subject**: {strongest_subject}
-                    
-                    Hours Logged: {strongest_hours:.1f}h
-                    
-                    Maintain or increase effort to consolidate your knowledge.
-                    """)
+                for tech in _study_techniques:
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                        border: 1px solid #334155; border-radius: 16px;
+                        padding: 20px 24px; margin-bottom: 14px;
+                        border-left: 5px solid {tech['color']};
+                    ">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <span style="font-size: 24px;">{tech['icon']}</span>
+                            <span style="font-size: 18px; font-weight: 800; color: #e2e8f0;">{tech['name']}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+                            <div>
+                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📌 What It Is</div>
+                                {tech['what']}
+                            </div>
+                            <div>
+                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🔧 How to Apply</div>
+                                {tech['how']}
+                            </div>
+                            <div>
+                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">⏰ When to Use</div>
+                                {tech['when']}
+                            </div>
+                            <div>
+                                <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📚 Best For Subjects</div>
+                                {tech['subjects']}
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; padding: 8px 14px; background: rgba(139,92,246,0.08); border-radius: 8px; font-size: 12px; color: #a78bfa;">
+                            💡 <strong>Impact:</strong> {tech['impact']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
             
-            # Subject Distribution Analysis
-            st.markdown("### 📈 Study Distribution Analysis")
-            
-            weak_subjects = subj_hours[subj_hours < subj_hours.mean()].index.tolist()
-            strong_subjects = subj_hours[subj_hours >= subj_hours.mean()].index.tolist()
-            
-            dist_col1, dist_col2 = st.columns(2)
-            
-            with dist_col1:
-                st.info(f"""
-                📍 **Below Average Subjects** ({len(weak_subjects)})
+            # ═══════════════════════════════════════════
+            # TAB 2 — PRODUCTIVITY METHODS
+            # ═══════════════════════════════════════════
+            with _tech_tab2:
+                _prod_methods = [
+                    {
+                        "name": "Pomodoro Technique",
+                        "icon": "🍅",
+                        "what": "25 min focused work → 5 min break → repeat 4 times → 30 min long break.",
+                        "routine": "**Morning**: 4 Pomodoros (hard subject) → Break → 4 Pomodoros (medium subject). **Evening**: 4 Pomodoros (revision/CA). Total = ~6h deep study.",
+                        "apply": "Use for subjects you find boring or hard to start. Physical timer > phone timer (avoid distraction). Track Pomodoro count daily.",
+                        "color": "#ef4444"
+                    },
+                    {
+                        "name": "Eat The Frog",
+                        "icon": "🐸",
+                        "what": "Do the hardest/most boring task FIRST thing in the morning when willpower is at its peak.",
+                        "routine": "**6:00-8:00 AM**: Your weakest UPSC subject (the 'frog'). No phone, no excuses. **After 8 AM**: Easier subjects feel effortless because the hard part is done.",
+                        "apply": "If Polity bores you — do Polity first. If Economics confuses you — do Economics first. Rotate the 'frog' based on what you're avoiding.",
+                        "color": "#22c55e"
+                    },
+                    {
+                        "name": "Time Blocking",
+                        "icon": "📅",
+                        "what": "Pre-assign every hour of your day to a specific activity. No 'free time' that becomes waste.",
+                        "routine": "**6-8 AM**: Hard subject | **9-11 AM**: Medium subject | **11:30-1 PM**: Current Affairs + Notes | **2:30-4:30 PM**: Revision/PYQs | **5-6 PM**: Answer Writing | **8-9 PM**: Light reading/newspaper",
+                        "apply": "Block in Google Calendar or physical planner. Include meals, walk, sleep. The key: treat each block as a meeting you can't skip.",
+                        "color": "#3b82f6"
+                    },
+                    {
+                        "name": "2-Minute Rule",
+                        "icon": "⚡",
+                        "what": "If a task takes < 2 minutes, do it NOW. For bigger tasks: commit to just 2 minutes to overcome inertia.",
+                        "routine": "Can't start studying? Open the book and read just 2 minutes. By then, momentum kicks in and you continue. Works for revision, notes, and answer writing too.",
+                        "apply": "Use when procrastinating. Also: reply to that message in 2 min instead of letting it become a 30-min distraction later.",
+                        "color": "#f59e0b"
+                    },
+                    {
+                        "name": "90-Minute Deep Work Cycles",
+                        "icon": "🔬",
+                        "what": "90 min of unbroken focus (phone off, door closed) → 20 min break. Aligned with your brain's ultradian rhythm.",
+                        "routine": "**2 cycles in morning** (3h study) + **2 cycles in afternoon** (3h study) = 6h of elite-level deep work. More effective than 10h of distracted study.",
+                        "apply": "Reserve for new chapter reading, answer writing, or mock test analysis. Never use for passive activities. Put phone in airplane mode.",
+                        "color": "#8b5cf6"
+                    },
+                    {
+                        "name": "Weekly Review & Planning",
+                        "icon": "📊",
+                        "what": "Every Sunday: review what you studied, what you skipped, and plan next week's targets.",
+                        "routine": "**Sunday 1h**: Check tracker data → What subjects got neglected? → What PYQs scored low? → Plan next 7 days with specific chapters/topics per day.",
+                        "apply": "Use your Study Routine Tracker data! Check productivity %, waste hours, and subject distribution. Adjust next week's plan based on actual data.",
+                        "color": "#06b6d4"
+                    },
+                    {
+                        "name": "Environment Design",
+                        "icon": "🏠",
+                        "what": "Design your physical space to make studying easy and distractions hard.",
+                        "routine": "**Study desk**: Only books + notes + water. **Phone**: In another room or locked drawer. **Study playlist**: Instrumental/lo-fi (no lyrics). **Lighting**: Bright white light.",
+                        "apply": "Remove all choice from your environment. When you sit at your desk, the ONLY thing you can do is study. Willpower is finite — environment design is permanent.",
+                        "color": "#ec4899"
+                    },
+                ]
                 
-                {', '.join(weak_subjects[:3]) if weak_subjects else 'None'}
-                {f'and {len(weak_subjects)-3} more...' if len(weak_subjects) > 3 else ''}
-                """)
+                for method in _prod_methods:
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                        border: 1px solid #334155; border-radius: 16px;
+                        padding: 20px 24px; margin-bottom: 14px;
+                        border-left: 5px solid {method['color']};
+                    ">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                            <span style="font-size: 24px;">{method['icon']}</span>
+                            <span style="font-size: 18px; font-weight: 800; color: #e2e8f0;">{method['name']}</span>
+                        </div>
+                        <div style="font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+                            <div style="margin-bottom: 10px;">
+                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📌 What It Is: </span>
+                                {method['what']}
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📅 Daily Routine: </span>
+                                {method['routine']}
+                            </div>
+                            <div>
+                                <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">🔧 How to Apply: </span>
+                                {method['apply']}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
             
-            with dist_col2:
-                st.info(f"""
-                ✨ **Above Average Subjects** ({len(strong_subjects)})
-                
-                {', '.join(strong_subjects[:3]) if strong_subjects else 'None'}
-                {f'and {len(strong_subjects)-3} more...' if len(strong_subjects) > 3 else ''}
-                """)
-
+            # ═══════════════════════════════════════════
+            # TAB 3 — SUBJECT-WISE STRATEGY (from PYQ data)
+            # ═══════════════════════════════════════════
+            with _tech_tab3:
+                if not _prelims_subjects:
+                    st.info("PYQ data not available. Please ensure pyq_data.json exists.")
+                else:
+                    st.markdown("""
+                    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 16px 20px; margin-bottom: 16px;">
+                        <div style="font-size: 14px; color: #e2e8f0; font-weight: 700; margin-bottom: 4px;">🎯 Subject Priority — Based on UPSC PYQ Analysis (Last 10 Years)</div>
+                        <div style="font-size: 12px; color: #94a3b8;">Higher importance score = more questions in Prelims. Study these subjects with maximum depth.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Subject-technique mapping
+                    _subject_technique_map = {
+                        "Current Affairs": {"technique": "Daily Tracking + Monthly Compilation", "books": "The Hindu, Indian Express, PIB, PRS", "hours_weekly": "7h (1h/day)", "method": "Read → Link to GS Paper → 1-line note → Monthly compile"},
+                        "Polity": {"technique": "Active Recall + Feynman", "books": "Laxmikanth (M. Laxmikanth), NCERT 9-12", "hours_weekly": "6-8h", "method": "Read article → Close book → Write from memory → Compare → Repeat"},
+                        "History": {"technique": "Mind Mapping + Timeline", "books": "Spectrum (Rajiv Ahir), NCERT 6-12, Bipin Chandra", "hours_weekly": "6-8h", "method": "Create chronological timelines → Mind maps per era → PYQ practice"},
+                        "Geography": {"technique": "Map-Based Study + SQ3R", "books": "NCERT 6-12, Majid Husain, Savindra Singh", "hours_weekly": "5-7h", "method": "Always study with atlas open → Draw maps from memory → Physical-human linkages"},
+                        "Economics": {"technique": "Feynman + Current Data", "books": "Ramesh Singh, NCERT 11-12, Economic Survey", "hours_weekly": "5-6h", "method": "Understand concept → Link to current budget/data → Simplify in own words"},
+                        "Environment & Ecology": {"technique": "Spaced Repetition + Flashcards", "books": "Shankar IAS, NCERT Biology", "hours_weekly": "4-5h", "method": "Fact-heavy → Anki flashcards for species/acts → Weekly revision → Map protected areas"},
+                    }
+                    
+                    for subj in _prelims_subjects:
+                        s_name = subj['subject']
+                        s_score = subj['importance_score']
+                        s_rank = subj['frequency_rank']
+                        s_map = _subject_technique_map.get(s_name, {})
+                        
+                        # Color based on importance
+                        if s_score >= 95:
+                            bar_color = "#ef4444"
+                            badge = "🔴 CRITICAL"
+                        elif s_score >= 90:
+                            bar_color = "#f59e0b"
+                            badge = "🟡 HIGH"
+                        else:
+                            bar_color = "#22c55e"
+                            badge = "🟢 IMPORTANT"
+                        
+                        st.markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                            border: 1px solid #334155; border-radius: 16px;
+                            padding: 20px 24px; margin-bottom: 14px;
+                            border-left: 5px solid {bar_color};
+                        ">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 20px; font-weight: 800; color: #e2e8f0;">#{s_rank} {s_name}</span>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <span style="font-size: 11px; padding: 3px 10px; border-radius: 20px; background: rgba(239,68,68,0.1); color: {bar_color}; font-weight: 700;">{badge}</span>
+                                    <span style="font-size: 20px; font-weight: 900; color: {bar_color};">{s_score}/100</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Progress bar -->
+                            <div style="background: #1e293b; border-radius: 8px; height: 8px; margin-bottom: 14px; overflow: hidden;">
+                                <div style="background: linear-gradient(90deg, {bar_color}, {bar_color}88); width: {s_score}%; height: 100%; border-radius: 8px;"></div>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+                                <div>
+                                    <div style="color: #a78bfa; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📋 Key Chapters</div>
+                                    {subj['important_chapters']}
+                                </div>
+                                <div>
+                                    <div style="color: #a78bfa; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🎯 High-Frequency PYQ Topics</div>
+                                    {subj['important_topics']}
+                                </div>
+                                <div>
+                                    <div style="color: #38bdf8; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🧠 Best Study Technique</div>
+                                    {s_map.get('technique', 'Active Recall + Spaced Repetition')}
+                                </div>
+                                <div>
+                                    <div style="color: #38bdf8; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📚 Standard Books</div>
+                                    {s_map.get('books', 'NCERT + Standard Reference')}
+                                </div>
+                                <div>
+                                    <div style="color: #10b981; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">⏱️ Weekly Hours</div>
+                                    {s_map.get('hours_weekly', '5-6h')}
+                                </div>
+                                <div>
+                                    <div style="color: #10b981; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🔧 How to Apply</div>
+                                    {s_map.get('method', subj['revision_strategy'][:100])}
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
             # ── SMART WORK TIPS (Study Target Manager) ──
             st.divider()
             _sw_tips_tm = generate_smart_work_tips(
