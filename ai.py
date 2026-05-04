@@ -23,8 +23,7 @@ def _get_api_key() -> str:
 
 
 def get_ai_insight(prompt: str, model_type: str = "heavy", max_tokens: int = 4000) -> str:
-    """Generic Groq call with automatic retry on rate limits."""
-    import time as _time
+    """Generic Groq call — non-blocking, no retries to avoid websocket timeouts."""
     try:
         from groq import Groq
         
@@ -34,45 +33,38 @@ def get_ai_insight(prompt: str, model_type: str = "heavy", max_tokens: int = 400
         
         client = Groq(api_key=api_key)
         
-        # Retry up to 3 times on rate limit with exponential backoff
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                res = client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model=ACTIVE_MODEL,
-                    max_tokens=max_tokens,
-                    temperature=0.7
-                )
-                
-                if res and res.choices and len(res.choices) > 0:
-                    message = res.choices[0].message
-                    if message and message.content:
-                        return message.content
-                
-                return "⚠️ Empty response from AI. Please try again."
-                
-            except Exception as e:
-                error_str = str(e).lower()
-                
-                # Rate limit — retry with backoff
-                if "rate" in error_str or "429" in error_str or "too many" in error_str:
-                    if attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 15  # 15s, 30s, 45s
-                        _time.sleep(wait_time)
-                        continue
-                    else:
-                        return "⚠️ Rate limit reached after retries. Please wait 1-2 minutes and try again."
-                
-                # Non-retryable errors
-                if "decommissioned" in error_str:
-                    return "⚠️ AI model temporarily unavailable. Please try again."
-                elif "authentication" in error_str or "unauthorized" in error_str:
-                    return "⚠️ API authentication failed. Please verify your Groq API key in .env file."
-                elif "connection" in error_str or "timeout" in error_str:
-                    return "⚠️ Connection error. Please check your internet connection."
-                else:
-                    return f"⚠️ AI error: {str(e)[:100]}"
+        try:
+            res = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=ACTIVE_MODEL,
+                max_tokens=max_tokens,
+                temperature=0.7
+            )
+            
+            if res and res.choices and len(res.choices) > 0:
+                message = res.choices[0].message
+                if message and message.content:
+                    return message.content
+            
+            return "⚠️ Empty response from AI. Please try again."
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            if "rate" in error_str or "429" in error_str or "too many" in error_str:
+                # Extract wait time from error if available
+                import re
+                wait_match = re.search(r'try again in (\d+\.?\d*)', error_str)
+                wait_hint = f" (wait ~{wait_match.group(1)}s)" if wait_match else ""
+                return f"⚠️ Rate limit reached{wait_hint}. Please wait 1-2 minutes and try again."
+            elif "decommissioned" in error_str:
+                return "⚠️ AI model temporarily unavailable. Please try again."
+            elif "authentication" in error_str or "unauthorized" in error_str:
+                return "⚠️ API authentication failed. Please verify your Groq API key in .env file."
+            elif "connection" in error_str or "timeout" in error_str:
+                return "⚠️ Connection error. Please check your internet connection."
+            else:
+                return f"⚠️ AI error: {str(e)[:150]}"
     
     except ImportError:
         return "⚠️ Groq library not installed. Install with: pip install groq"

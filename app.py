@@ -4153,42 +4153,20 @@ elif menu == "Ask Esu":
                 st.warning("Please enter a question or request for Esu!")
             else:
                 with st.spinner("🤔 Esu is thinking..."):
-                    # Prepare LEAN context — only factual data, no labels
-                    context = f"""User's Study Data (for reference only):
-- Total Study Hours: {prod_total_esu:.1f}h
-- Essential Hours (Work/Coaching): {essential_total_esu:.1f}h
-- Waste Time: {waste_total_esu:.1f}h
-- Subjects Studied: {len(subj_data)}
-- Subject Hours: {subj_data}
-- Total Tracked Hours: {prod_total_esu + essential_total_esu + waste_total_esu:.1f}h"""
-                    
-                    # Add chapter completion if available
-                    if chapter_completion_summary:
-                        context += f"\n- Chapter Completion: {chapter_completion_summary}"
+                    # Prepare ULTRA-LEAN context to minimize tokens
+                    context = f"Study:{prod_total_esu:.0f}h | Work:{essential_total_esu:.0f}h | Waste:{waste_total_esu:.0f}h"
                     
                     # Add exam timeline if set
                     if exam_date:
-                        context += f"\n\nExam Info:"
-                        context += f"\n- Exam Date: {exam_date.strftime('%B %d, %Y')}"
-                        context += f"\n- Days Remaining: {days_left} days"
+                        context += f" | Exam:{exam_date.strftime('%b %d, %Y')} ({days_left}d left)"
                     
-                    # Build rich PYQ context (used by AI only when question is study-related)
+                    # Build MINIMAL PYQ context — only top 3 subjects, no verbose details
                     pyq_context = ""
                     if pyq_data_prelims:
-                        pyq_context += "PRELIMS PYQ Subject Rankings:\n"
-                        for s in pyq_data_prelims:
-                            pyq_context += f"\n#{s['frequency_rank']} {s['subject']} (Importance: {s['importance_score']}/100)"
-                            pyq_context += f"\n  Chapters: {s['important_chapters']}"
-                            pyq_context += f"\n  Topics: {s['important_topics']}"
-                            pyq_context += f"\n  Strategy: {s['revision_strategy']}"
-                    
-                    if pyq_data_mains:
-                        pyq_context += "\n\nMAINS PYQ Subject Rankings:\n"
-                        for s in pyq_data_mains:
-                            pyq_context += f"\n#{s['frequency_rank']} {s['subject']} (Importance: {s['importance_score']}/100)"
-                            pyq_context += f"\n  Chapters: {s['important_chapters']}"
-                            pyq_context += f"\n  Topics: {s['important_topics']}"
-                            pyq_context += f"\n  Strategy: {s['revision_strategy']}"
+                        top3 = pyq_data_prelims[:3]
+                        pyq_context = "Top PYQ: " + ", ".join(
+                            f"{s['subject']}({s['importance_score']}/100)" for s in top3
+                        )
                     
                     # Call AI with smart context injection
                     try:
