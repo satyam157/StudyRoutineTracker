@@ -2899,6 +2899,20 @@ elif menu == "Study Target Manager":
                 {f'and {len(strong_subjects)-3} more...' if len(strong_subjects) > 3 else ''}
                 """)
 
+            # ── SMART WORK TIPS (Study Target Manager) ──
+            st.divider()
+            _sw_tips_tm = generate_smart_work_tips(
+                prod_hours=subj_hours.sum(),
+                waste_hours=0,
+                essential_hours=0,
+                study_streak=0,
+                focus_pct=0,
+                subject_count=num_subjects,
+                productivity_pct=0,
+                context="target"
+            )
+            st.markdown(render_smart_work_section(_sw_tips_tm, max_tips=5), unsafe_allow_html=True)
+
 
 # ---------------- PRODUCTIVITY ANALYSIS ----------------
 elif menu == "Productivity Analysis":
@@ -3288,7 +3302,21 @@ elif menu == "Productivity Analysis":
                 else:
                     st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
 
-                st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
+                # ── SMART WORK TIPS (Productivity Analysis — Daily Tab) ──
+                _sw_streak_pa = streak(df_daily)
+                _sw_focus_pa = focus_score(df_daily)
+                _sw_prod_pct_pa = productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict)
+                _sw_tips_pa = generate_smart_work_tips(
+                    prod_hours=prod_total,
+                    waste_hours=waste_total,
+                    essential_hours=essential_total,
+                    study_streak=_sw_streak_pa,
+                    focus_pct=_sw_focus_pa,
+                    subject_count=len(prod_df['subject'].unique()) if not prod_df.empty else 0,
+                    productivity_pct=_sw_prod_pct_pa,
+                    context="productivity"
+                )
+                st.markdown(render_smart_work_section(_sw_tips_pa, max_tips=6), unsafe_allow_html=True)
 
 
 
@@ -4120,6 +4148,22 @@ elif menu == "Ask Esu":
                                          for subject in subj_data.keys()}
         else:
             chapter_completion_summary = {}
+        
+        # ── SMART WORK TIPS (Ask Esu Page) ──
+        _sw_streak_esu = streak(df_all) if not df_all.empty else 0
+        _sw_focus_esu = focus_score(df_all) if not df_all.empty else 0
+        _sw_tips_esu = generate_smart_work_tips(
+            prod_hours=prod_total_esu,
+            waste_hours=waste_total_esu,
+            essential_hours=essential_total_esu,
+            study_streak=_sw_streak_esu,
+            focus_pct=_sw_focus_esu,
+            subject_count=len(subj_data),
+            productivity_pct=0,
+            context="ask_esu"
+        )
+        with st.expander("⚡ Smart Work Tips & Strategies", expanded=False):
+            st.markdown(render_smart_work_section(_sw_tips_esu, max_tips=8), unsafe_allow_html=True)
         
         # ── Question Input ──
         col1, col2 = st.columns([3, 1])

@@ -792,3 +792,192 @@ def get_top_study_days(df: pd.DataFrame, year=None, month=None, is_weekend=None)
     
     return report_df
 
+
+# ════════════════════════════════════════════════════════════════════════
+# SMART WORK TIPS ENGINE — Data-driven, no AI calls needed
+# ════════════════════════════════════════════════════════════════════════
+
+def generate_smart_work_tips(prod_hours=0, waste_hours=0, essential_hours=0,
+                              study_streak=0, focus_pct=0, subject_count=0,
+                              productivity_pct=0, context="general"):
+    """
+    Generate contextual smart work tips based on user's actual data.
+    
+    Args:
+        prod_hours: Total productive study hours
+        waste_hours: Total waste hours
+        essential_hours: Total essential (work/coaching) hours
+        study_streak: Current study streak in days
+        focus_pct: Focus score (% of deep work sessions ≥ 2h)
+        subject_count: Number of subjects studied
+        productivity_pct: Overall productivity percentage
+        context: 'productivity' | 'target' | 'ask_esu' | 'general'
+    
+    Returns:
+        List of tip dicts: [{icon, category, tip, priority}]
+    """
+    tips = []
+    
+    # ── TECHNIQUE TIPS (always useful) ──
+    core_techniques = [
+        {"icon": "🍅", "category": "Pomodoro Technique",
+         "tip": "**25 min focus → 5 min break → repeat 4x → 30 min long break.** Best for subjects you find boring. Use a physical timer to avoid phone distraction."},
+        {"icon": "🧠", "category": "Active Recall",
+         "tip": "**Close the book and write everything you remember.** Then check what you missed. This builds 3x stronger memory than passive reading."},
+        {"icon": "📆", "category": "Spaced Repetition",
+         "tip": "**Revise on Day 1 → Day 3 → Day 7 → Day 21 → Day 45.** Mark revision dates in your calendar. Without this, you'll forget 80% within a week."},
+        {"icon": "🎯", "category": "Eat The Frog",
+         "tip": "**Do your hardest/most boring subject FIRST in the morning** when willpower is highest. Save easier subjects for evening when energy dips."},
+        {"icon": "📝", "category": "Feynman Technique",
+         "tip": "**Explain the topic as if teaching a 10-year-old.** Where you struggle to simplify = where you don't truly understand. Go back and study those gaps."},
+    ]
+    
+    # ── DATA-DRIVEN TIPS ──
+    
+    # Waste time analysis
+    if waste_hours > 0:
+        daily_waste = waste_hours  # Assume this is per-period
+        if daily_waste > 3:
+            tips.append({"icon": "🚫", "category": "Waste Recovery",
+                "tip": f"**You have {waste_hours:.0f}h of waste time.** Use the '2-Minute Rule': if tempted by distraction, tell yourself 'just 2 more minutes of study.' Your brain usually forgets the distraction. Install app blockers during study hours.",
+                "priority": 1})
+        elif daily_waste > 1:
+            tips.append({"icon": "⏰", "category": "Time Boxing",
+                "tip": f"**{waste_hours:.0f}h waste is recoverable.** Schedule specific 'guilt-free' leisure slots (e.g., 7-8 PM). Outside those slots, phone stays in another room. This eliminates 60-70% of casual waste.",
+                "priority": 2})
+    
+    # Focus score tips
+    if focus_pct < 30:
+        tips.append({"icon": "🔬", "category": "Deep Work",
+            "tip": "**Your deep work sessions (≥2h unbroken) are low.** Try 'Cave Mode': pick one subject, set a 2-hour timer, put phone in airplane mode, and work in complete silence. Even 1 deep session/day transforms results.",
+            "priority": 1})
+    elif focus_pct > 60:
+        tips.append({"icon": "💪", "category": "Deep Work Master",
+            "tip": f"**Your focus score is {focus_pct:.0f}% — excellent.** Protect your peak focus hours. Consider adding interleaving: switch between 2 related subjects within a deep session to strengthen cross-connections.",
+            "priority": 3})
+    
+    # Study streak tips
+    if study_streak == 0:
+        tips.append({"icon": "🔥", "category": "Start a Streak",
+            "tip": "**Study even 30 minutes today to start a streak.** Consistency > intensity. A 30-day streak of 3h/day beats sporadic 10h marathon sessions. The brain needs daily repetition to form neural pathways.",
+            "priority": 1})
+    elif study_streak >= 7:
+        tips.append({"icon": "🔥", "category": "Streak Power",
+            "tip": f"**{study_streak}-day streak! 🔥** You've built momentum. Now add 'Progressive Overload': increase daily hours by 15 minutes every week. Small increments compound into massive results.",
+            "priority": 3})
+    
+    # Productivity tips
+    if productivity_pct > 0:
+        if productivity_pct < 30:
+            tips.append({"icon": "📊", "category": "Productivity Boost",
+                "tip": f"**{productivity_pct:.0f}% productivity — room for growth.** Use the 'MIT Method': identify your 3 Most Important Tasks each morning. Complete those BEFORE anything else. Even finishing 2/3 MITs will double your output.",
+                "priority": 1})
+        elif productivity_pct > 60:
+            tips.append({"icon": "🏆", "category": "High Performer",
+                "tip": f"**{productivity_pct:.0f}% productivity — strong!** Now optimize quality: for every 2 hours of new learning, spend 30 min on revision. The 80/20 rule: 20% of topics account for 80% of exam marks — focus there.",
+                "priority": 3})
+    
+    # Work-life balance tips (if essential hours exist)
+    if essential_hours > 0:
+        tips.append({"icon": "⚖️", "category": "Work + Study Balance",
+            "tip": f"**You have {essential_hours:.0f}h of work/coaching.** Use 'Sandwich Technique': study 1h BEFORE work (peak brain), then 2-3h AFTER work. During lunch break, do 15-min flashcard revision. Commute = podcast/audio notes.",
+            "priority": 2})
+    
+    # Subject count tips
+    if subject_count > 5:
+        tips.append({"icon": "🔄", "category": "Subject Rotation",
+            "tip": f"**{subject_count} subjects — use a 3-day rotation.** Day 1: 3 subjects (2 hard + 1 easy). Day 2: next 3 subjects. Day 3: remaining + revision of Day 1. This ensures every subject gets attention weekly.",
+            "priority": 2})
+    
+    # ── CONTEXT-SPECIFIC TIPS ──
+    if context == "productivity":
+        tips.append({"icon": "📈", "category": "Energy Management",
+            "tip": "**Track energy, not just time.** Your brain has 2-3 peak hours/day (usually 9-11 AM or 2-4 PM). Use these for hardest subjects. Reserve low-energy slots for revision, notes, or current affairs.",
+            "priority": 2})
+        tips.append({"icon": "😴", "category": "Sleep = Memory",
+            "tip": "**7-8 hours sleep is non-negotiable.** During deep sleep, your brain consolidates everything studied that day. Cutting sleep to study more actually REDUCES what you retain. Sleep before midnight for best quality.",
+            "priority": 2})
+    
+    elif context == "target":
+        tips.append({"icon": "🎯", "category": "Target Acceleration",
+            "tip": "**Falling behind? Use 'Sprint Weeks.'** Pick the target closest to deadline, block 4-5h/day for just that subject for 5 days. Intense focused bursts are more effective than slow, scattered effort.",
+            "priority": 2})
+        tips.append({"icon": "✅", "category": "Micro-Goals",
+            "tip": "**Break each target into daily micro-goals.** Instead of 'Complete 10 chapters in 30 days,' set 'Finish Chapter 5, pages 45-80 today.' Specific = actionable = achievable.",
+            "priority": 2})
+    
+    elif context == "ask_esu":
+        tips.append({"icon": "🗞️", "category": "Current Affairs Strategy",
+            "tip": "**30 min daily: The Hindu/Indian Express.** Don't just read — link every news item to a GS paper. Environment → GS3, Policy → GS2, History connection → GS1. Make a 1-line note for each. Monthly compilation = revision-ready.",
+            "priority": 2})
+        tips.append({"icon": "✍️", "category": "Answer Writing",
+            "tip": "**Write 2 answers daily from Day 1.** Use UPSC structure: Intro (2 lines) → Body (points + examples) → Conclusion (way forward). Even bad answers improve fast with daily practice. Get them evaluated weekly.",
+            "priority": 2})
+    
+    # Always add core techniques
+    for i, t in enumerate(core_techniques):
+        t["priority"] = 4 + i  # Lower priority than data-driven tips
+        tips.append(t)
+    
+    # Sort by priority (lower = more relevant)
+    tips.sort(key=lambda x: x.get("priority", 99))
+    
+    return tips
+
+
+def render_smart_work_section(tips, max_tips=6):
+    """
+    Returns HTML for rendering the smart work tips section in Streamlit.
+    Call with st.markdown(html, unsafe_allow_html=True)
+    
+    Args:
+        tips: List of tip dicts from generate_smart_work_tips()
+        max_tips: Max number of tips to show
+    """
+    if not tips:
+        return ""
+    
+    display_tips = tips[:max_tips]
+    
+    # Build cards HTML
+    cards_html = ""
+    for t in display_tips:
+        cards_html += f"""
+        <div style="
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid #334155; border-radius: 14px;
+            padding: 16px 20px; margin-bottom: 10px;
+            border-left: 4px solid #8b5cf6;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        ">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                <span style="font-size: 20px;">{t['icon']}</span>
+                <span style="font-size: 13px; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.5px;">
+                    {t['category']}
+                </span>
+            </div>
+            <div style="font-size: 14px; color: #e2e8f0; line-height: 1.6;">
+                {t['tip']}
+            </div>
+        </div>
+        """
+    
+    html = f"""
+    <div style="
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a5f 100%);
+        padding: 20px 22px 10px 22px; border-radius: 16px;
+        border: 1px solid #4f46e5; margin: 20px 0;
+        box-shadow: 0 8px 32px rgba(79, 70, 229, 0.15);
+    ">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
+            <span style="font-size: 26px;">⚡</span>
+            <h3 style="margin: 0; color: #e0e7ff; font-weight: 800; letter-spacing: -0.3px;">Smart Work Tips</h3>
+            <span style="font-size: 12px; color: #818cf8; background: rgba(129,140,248,0.15); padding: 3px 10px; border-radius: 20px; font-weight: 600;">
+                Based on your data
+            </span>
+        </div>
+        {cards_html}
+    </div>
+    """
+    return html
+
