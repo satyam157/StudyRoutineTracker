@@ -4,99 +4,179 @@
       "subject": "Current Affairs",
       "importance_score": 99,
       "frequency_rank": 1,
-      "important_chapters": "Recent Events (2024-2025), National Issues, International Relations, Climate Action, Social Movements, Economic Updates",
-      "important_topics": "Budget announcements, Government schemes, Climate summits, Election updates, UN decisions, Trade relations, Infrastructure projects, Tech advancements",
-      "revision_strategy": "Daily current affairs tracking. Weekly news summary. Bi-weekly comprehensive revision. Monthly categorization into static + dynamic components."
+      "important_chapters": "Government Schemes, International Summits, Science Discoveries, Awards & Honours, Sports Events, Defence Exercises, Bills & Acts, Appointments",
+      "important_topics": "Budget highlights, Union/State schemes, Climate summits (COP), G20/BRICS/SCO, New species discovered, Space missions (ISRO/NASA), Trade agreements, Constitutional amendments",
+      "revision_strategy": "Daily: The Hindu/Indian Express (30 min). Weekly: compile notes by GS paper. Monthly: revision of all compiled notes. Use PIB, PRS, Yojana, Kurukshetra."
     },
     {
-      "subject": "Polity",
+      "subject": "Polity & Constitution",
       "importance_score": 96,
       "frequency_rank": 2,
-      "important_chapters": "Constitution, Fundamental Rights, Directive Principles, Parliamentary System, President & Vice-President, Lok Sabha & Rajya Sabha, Cabinet, Supreme Court",
-      "important_topics": "Amendment procedures, Bills process, Constitutional bodies, Rights vs Duties, Executive-Legislative relations, Judicial review, Election commission",
-      "revision_strategy": "Conceptual foundation first (Constitution structure). MCQ practice on specific articles. Mock tests on scenario-based questions. Regular revision of recent amendments."
+      "important_chapters": "Fundamental Rights & Duties, DPSP, Parliament, President & Governor, Supreme Court & High Courts, Constitutional Bodies, Amendment Procedure, Federalism, Local Governance, Election Commission",
+      "important_topics": "Articles 12-35 (Rights), 36-51 (DPSP), Amendment process, Anti-defection law, RTI Act, Panchayati Raj, CAG, Finance Commission, UPSC, Tribunals, Emergency provisions",
+      "revision_strategy": "Master Laxmikanth chapter-wise. Practice article-based MCQs. Focus on recent SC judgments. Create comparison charts (President vs Governor, LS vs RS)."
     },
     {
-      "subject": "History",
+      "subject": "Modern History",
       "importance_score": 95,
       "frequency_rank": 3,
-      "important_chapters": "Ancient India, Medieval India, British India, Freedom Struggle, Post-independence, Cultural heritage, Monuments",
-      "important_topics": "Mauryan empire, Mughal period, Company rule, Key freedom fighters, Constitution making, Archaeological sites, Dynasties and rulers",
-      "revision_strategy": "Chronological study approach. Thematic connections across periods. Timeline creation for each era. Practice timeline-based and fact-based MCQs. Mind maps for complex periods."
+      "important_chapters": "British Expansion, Revolt of 1857, Social Reform Movements, Indian National Congress, Gandhian Era, Revolutionary Movements, Post-Independence India",
+      "important_topics": "Governor Generals & policies, Land revenue systems, Swadeshi movement, Non-Cooperation, Civil Disobedience, Quit India, Tribal revolts, Press acts, Partition, Constitution making",
+      "revision_strategy": "Spectrum (Rajiv Ahir) as base. Create timeline charts. Link freedom fighters to movements. Practice statement-based PYQs. NCERT 8, 11, 12."
+    },
+    {
+      "subject": "Ancient History",
+      "importance_score": 88,
+      "frequency_rank": 4,
+      "important_chapters": "Indus Valley Civilization, Vedic Period, Buddhism & Jainism, Mauryan Empire, Gupta Empire, Sangam Age, Temple Architecture",
+      "important_topics": "Harappan sites & features, Vedic literature (Shruti/Smriti), Ashoka's edicts, Gupta art & science, Rock-cut architecture, Sangam literature, Ancient trade routes",
+      "revision_strategy": "NCERT 6, 11 (Ancient India). Tamil Nadu Board textbooks. Focus on archaeological sites, art & architecture. Map-mark important sites."
+    },
+    {
+      "subject": "Medieval History",
+      "importance_score": 82,
+      "frequency_rank": 5,
+      "important_chapters": "Delhi Sultanate, Vijayanagara & Bahmani, Mughal Empire, Bhakti & Sufi Movements, Maratha Empire, Regional Kingdoms",
+      "important_topics": "Sultanate administration, Mughal architecture, Din-i-Ilahi, Bhakti saints (Kabir, Nanak, Mirabai), Shivaji's administration, Land revenue systems (Iqta, Mansabdari, Ryotwari)",
+      "revision_strategy": "Satish Chandra (Medieval India). Focus on administration systems, cultural developments. Compare dynasties. Link architecture to periods. NCERT 7, 11."
+    },
+    {
+      "subject": "Art & Culture",
+      "importance_score": 85,
+      "frequency_rank": 6,
+      "important_chapters": "Indian Architecture (Temple, Indo-Islamic, Colonial), Painting Schools, Classical & Folk Dances, Music, Literature, UNESCO World Heritage Sites, Handicrafts & Textiles",
+      "important_topics": "Temple styles (Nagara, Dravida, Vesara), Mughal miniatures, Rajput paintings, Bharatanatyam/Kathak/Odissi, GI-tagged products, Intangible Cultural Heritage, Rock-cut caves",
+      "revision_strategy": "Nitin Singhania (Art & Culture). Visual learning — see images of monuments. Create comparison tables. Map UNESCO sites. Practice identification-based questions."
     },
     {
       "subject": "Geography",
       "importance_score": 92,
-      "frequency_rank": 4,
-      "important_chapters": "Physical Geography (Climate, Landforms), Economic Geography, Human Geography, Indian Geography, Map-based knowledge",
-      "important_topics": "Monsoon patterns, Soil types, River systems, Mountain ranges, Agricultural zones, Mineral resources, Population distribution, Earthquake zones",
-      "revision_strategy": "Physical maps study. Thematic maps creation. Climate-vegetation relationships. State-wise geography focus. Latitude-longitude practice. Monthly map revision."
+      "frequency_rank": 7,
+      "important_chapters": "Geomorphology, Climatology, Oceanography, Indian Physical Geography, Indian Climate & Monsoon, Soil & Vegetation, Resources & Industries, Population & Urbanization",
+      "important_topics": "Plate tectonics, Monsoon mechanism, El Niño/La Niña, River systems, Soil types, Agro-climatic zones, Mineral distribution, Census data, Smart Cities, Migration patterns",
+      "revision_strategy": "NCERT 6-12 Geography. Majid Husain for Indian Geography. Always study with atlas. Draw maps from memory. Practice map-based questions weekly."
     },
     {
       "subject": "Economics",
-      "importance_score": 88,
-      "frequency_rank": 5,
-      "important_chapters": "Microeconomics basics, Macroeconomics, Indian Economy, Monetary & Fiscal Policy, Inflation & Deflation, Trade",
-      "important_topics": "GDP and growth rates, Inflation rates, Interest rates, Budget components, Direct-indirect taxes, FDI, Exports-imports, Stock market basics",
-      "revision_strategy": "Concepts with current data. Comparative analysis year-on-year. Budget document familiarity. Economic survey highlights. Real case studies from India."
+      "importance_score": 90,
+      "frequency_rank": 8,
+      "important_chapters": "National Income, Money & Banking, Fiscal Policy, Monetary Policy, Inflation, External Sector, Agriculture, Industry, Infrastructure, Government Budgeting",
+      "important_topics": "GDP/GNP concepts, RBI tools (Repo, CRR, SLR), Types of inflation, FDI vs FPI, WTO agreements, GST, FRBM Act, Disinvestment, PPP model, Financial inclusion schemes",
+      "revision_strategy": "Ramesh Singh as base. NCERT 11-12. Read Economic Survey highlights. Track Budget data. Practice concept-based MCQs. Link theory to current data."
     },
     {
       "subject": "Environment & Ecology",
       "importance_score": 87,
-      "frequency_rank": 6,
-      "important_chapters": "Ecosystems, Biodiversity, Pollution, Conservation, Climate Change, Environmental laws, Protected areas",
-      "important_topics": "Renewable energy, Wildlife protection acts, Ramsar wetlands, Biosphere reserves, Deforestation, Environmental impact assessment, Green initiatives",
-      "revision_strategy": "Concept mapping. Data about India's biodiversity. Protected area locations. Environmental laws with amendments. Climate science fundamentals. Case studies on conservation."
+      "frequency_rank": 9,
+      "important_chapters": "Ecosystems, Biodiversity, Pollution, Climate Change, Conservation (In-situ & Ex-situ), Environmental Laws, Protected Areas, International Agreements",
+      "important_topics": "Ramsar wetlands, Biosphere reserves, Tiger reserves, IUCN Red List categories, COP agreements, Paris Agreement, Ozone layer, Renewable energy, EIA, Wildlife Protection Act 1972",
+      "revision_strategy": "Shankar IAS Environment. NCERT Biology chapters. Map all National Parks & Sanctuaries. Create species-habitat flashcards. Track environmental news weekly."
+    },
+    {
+      "subject": "Indian Society",
+      "importance_score": 80,
+      "frequency_rank": 10,
+      "important_chapters": "Diversity of India, Caste System, Communalism, Regionalism, Secularism, Women's Issues, Population & Urbanization, Globalization Effects",
+      "important_topics": "Tribal issues, Gender inequality, Demographic dividend, Social empowerment schemes, Urbanization challenges, Role of NGOs, Poverty & inequality, Migration patterns",
+      "revision_strategy": "NCERT Sociology 11-12. Link social issues to government schemes. Use data from Census, NFHS, HDI reports. Practice answer writing with case studies."
+    },
+    {
+      "subject": "Governance",
+      "importance_score": 84,
+      "frequency_rank": 11,
+      "important_chapters": "Government Policies & Schemes, E-governance, Transparency & Accountability, Role of Civil Services, Welfare Schemes, Statutory & Regulatory Bodies",
+      "important_topics": "RTI Act, Citizen's Charter, Social Audit, DBT, Aadhaar, Digital India, MGNREGA, PMJDY, Ayushman Bharat, NEP 2020, PM-KISAN, Smart Cities Mission",
+      "revision_strategy": "Track all major government schemes with launch year, ministry, and beneficiaries. Create comparison tables. Practice Mains-style answers on scheme analysis."
+    },
+    {
+      "subject": "International Relations",
+      "importance_score": 83,
+      "frequency_rank": 12,
+      "important_chapters": "India's Foreign Policy, India & Neighbours, India & Major Powers, International Organizations, Regional Groupings, Global Issues",
+      "important_topics": "India-China relations, India-Pakistan, India-US strategic partnership, Quad, BRICS, SCO, ASEAN, UN reforms, WTO disputes, Nuclear doctrine, Maritime security, Indo-Pacific",
+      "revision_strategy": "Rajesh Rajagopalan (IR textbook). Track MEA statements. Map India's bilateral relations. Focus on recent treaties & agreements. Practice answer writing on IR themes."
+    },
+    {
+      "subject": "Science & Technology",
+      "importance_score": 81,
+      "frequency_rank": 13,
+      "important_chapters": "Space Technology, Defence Technology, Biotechnology, Nanotechnology, IT & Cyber Security, Nuclear Technology, Health & Disease",
+      "important_topics": "ISRO missions (Chandrayaan, Gaganyaan, Aditya-L1), DRDO projects, AI & Machine Learning, 5G/6G, Blockchain, Gene editing (CRISPR), Quantum computing, Cyber threats",
+      "revision_strategy": "Science Reporter magazine. Track ISRO/DRDO news. Understand basic concepts (not deep science). Create technology-application mapping. Practice application-based MCQs."
+    },
+    {
+      "subject": "Ethics",
+      "importance_score": 86,
+      "frequency_rank": 14,
+      "important_chapters": "Ethical Thinkers (Indian & Western), Attitude, Aptitude, Emotional Intelligence, Public Service Values, Probity in Governance, Case Studies",
+      "important_topics": "Aristotle, Kant, Gandhi, Ambedkar, Kautilya ethics, Foundational values (Integrity, Empathy, Tolerance), Ethical dilemmas, Conflict of interest, Corporate governance, RTI & transparency",
+      "revision_strategy": "Lexicon Ethics (Chronicle). Practice 15+ case studies weekly. Build vocabulary of ethical concepts. Write 200-word answers daily. Link thinkers to real situations."
+    },
+    {
+      "subject": "Internal Security",
+      "importance_score": 78,
+      "frequency_rank": 15,
+      "important_chapters": "Terrorism, Naxalism, Border Security, Cyber Security, Money Laundering, Organized Crime, Role of Media & Social Media, Defence Forces",
+      "important_topics": "Left Wing Extremism, J&K situation, NE insurgency, UAPA Act, NIA, AFSPA, Coastal security, Drone threats, Radicalization, FATF, Hawala, Dark web",
+      "revision_strategy": "Ashok Kumar (Internal Security). Track MHA reports. Understand institutional framework (NIA, NSA, RAW, IB). Practice answer writing on security-development balance."
+    },
+    {
+      "subject": "Sociology (Optional)",
+      "importance_score": 85,
+      "frequency_rank": 16,
+      "important_chapters": "Sociological Thinkers, Research Methods, Stratification, Religion & Society, Social Movements, Indian Society Structure, Caste & Class, Tribal Communities, Challenges of Social Transformation",
+      "important_topics": "Marx, Weber, Durkheim, Merton, Parsons, Indian thinkers (M.N. Srinivas, A.R. Desai, Andre Beteille), Sanskritization, Dominant caste, Agrarian class structure, Women's movement, Dalit movement",
+      "revision_strategy": "Haralambos (Sociology). IGNOU notes for Indian Society. Practice 20-mark answers weekly. Use diagrams/flowcharts. Link thinkers to Indian examples. Cover Paper 1 & 2 equally."
     }
   ],
   "mains": [
     {
-      "subject": "Polity",
-      "importance_score": 98,
+      "subject": "GS1: History, Geography, Society",
+      "importance_score": 96,
       "frequency_rank": 1,
-      "important_chapters": "Constitution - structure and features, Federalism, Separation of powers, Rights and duties, Amendment procedure, Electoral system, Local governance",
-      "important_topics": "Constitutional vision, Directive principles vs Fundamental rights, Executive accountability, Parliamentary procedures, E-governance, Cooperative federalism, Constitutional commissions",
-      "revision_strategy": "Deep study of constitutional provisions with case law. Analysis of major Supreme Court judgments. Comparative constitutionalism. Current constitutional debates. Essay writing on constitutional themes. Answer writing practice on case-based scenarios."
+      "important_chapters": "Ancient-Medieval-Modern History linkages, World History (French/Industrial Revolution), Indian Geography in depth, Indian Society & Diversity, Women & Urbanization",
+      "important_topics": "Freedom struggle phases, Post-independence consolidation, World Wars impact, Colonialism, Globalization effects, Social empowerment, Salient features of Indian society, Population issues",
+      "revision_strategy": "Analytical approach — don't just describe, analyze causes & effects. Practice 250-word answers. Use maps in Geography answers. Include data & examples. Write 3 answers/day from GS1."
     },
     {
-      "subject": "History",
-      "importance_score": 97,
+      "subject": "GS2: Polity, Governance, IR",
+      "importance_score": 98,
       "frequency_rank": 2,
-      "important_chapters": "Indus Valley Civilization, Vedic period, Mauryan and Gupta empires, Medieval kingdoms, British colonial period, Independence movement, Nation building",
-      "important_topics": "Historical determinism vs contingency, Historiography changes, Gender in history, Economic history of India, Cultural interactions, Legacy of empires, Freedom struggle phases",
-      "revision_strategy": "Analytical approach to historiography. Long essays on major periods. Comparison between historical periods. Primary sources analysis. Research paper reading. Critical historical perspective."
+      "important_chapters": "Constitutional provisions, Parliament & State Legislatures, Executive & Judiciary, Federal structure, Govt policies for vulnerable sections, International relations, India & neighbours",
+      "important_topics": "Separation of powers, Judicial activism, Centre-State relations, Statutory bodies, NGOs-SHGs, Health-Education governance, India's foreign policy evolution, Bilateral & multilateral relations",
+      "revision_strategy": "Current + static integration is key. Every Polity answer must reference recent developments. Practice writing Introduction-Body-Conclusion format. Use SC judgments as examples."
     },
     {
-      "subject": "Geography",
+      "subject": "GS3: Economy, Environment, Security",
       "importance_score": 94,
       "frequency_rank": 3,
-      "important_chapters": "Geomorphology, Climate systems, Human geography, Regional planning, Sustainability, Geographical analysis methods",
-      "important_topics": "River management, Urban planning, Regional disparities, Migration patterns, Resource management, Disaster management, Infrastructure development, Geopolitical issues",
-      "revision_strategy": "Geospatial analysis and interpretation. Critical study of development models. Regional case studies. Contemporary geographical problems. Research paper writing on geographical themes."
+      "important_chapters": "Indian Economy development, Agriculture, Food security, Industrial policy, Infrastructure, Environment conservation, Disaster management, Internal security challenges",
+      "important_topics": "Inclusive growth, Land reforms, Food processing, E-technology, Environmental pollution, Conservation strategies, Linkages of organized crime with terrorism, Border management, Cyber security",
+      "revision_strategy": "Data-heavy paper — memorize key statistics. Economic Survey is must-read. Environment answers need diagrams. Security answers need balanced view. Practice 3 answers/day."
     },
     {
-      "subject": "Environment & Ecology",
-      "importance_score": 90,
+      "subject": "GS4: Ethics & Integrity",
+      "importance_score": 92,
       "frequency_rank": 4,
-      "important_chapters": "Ecosystem functioning, Biodiversity management, Environmental degradation, Sustainable development, Climate change mitigation, Conservation strategies",
-      "important_topics": "Ecological carrying capacity, Biodiversity loss drivers, Climate financing, Green economy, Environmental justice, Transboundary issues, Habitat restoration",
-      "revision_strategy": "Scientific understanding of ecological systems. Global environmental agreements analysis. Case studies on environmental management. Essay writing on sustainability. Critical appraisal of development vs conservation."
+      "important_chapters": "Ethics fundamentals, Attitude & Aptitude, Emotional Intelligence, Contributions of moral thinkers, Public service values, Probity in governance, Case studies (125 marks)",
+      "important_topics": "Ethical dilemmas in governance, Conflict of interest, Corporate governance ethics, Compassion & empathy in public service, Ethical concerns in international relations, Information sharing & transparency",
+      "revision_strategy": "Case studies = 125 marks (half the paper). Practice 2 case studies daily. Build ethical vocabulary. Quote thinkers naturally. Maintain word limit strictly. Focus on actionable solutions."
     },
     {
-      "subject": "Economics",
-      "importance_score": 91,
+      "subject": "Essay",
+      "importance_score": 90,
       "frequency_rank": 5,
-      "important_chapters": "Economic theory and practices, Development economics, International trade, Fiscal and monetary policies, Inequality and poverty, Sectoral economics",
-      "important_topics": "Growth vs development, Structural changes, Inclusive growth, Globalization impact, Financial systems, Infrastructure economics, Human capital, Resource allocation",
-      "revision_strategy": "Theoretical framework understanding. Indian economic data analysis. Econometric concepts. Policy evaluation and critique. Research papers on economic issues. Essay writing on economic development."
+      "important_chapters": "Philosophical & Abstract topics, Social issues, Political themes, Economic topics, Science & Environment, International issues",
+      "important_topics": "Democracy themes, Technology impact, India's role in world, Gender equality, Environmental ethics, Education reforms, Rural-urban divide, Cultural preservation",
+      "revision_strategy": "Write 1 full essay/week (1000-1200 words). Structure: Intro → Multidimensional body (social, economic, political, ethical angles) → Conclusion. Use quotes, data, examples. Read topper essays."
     },
     {
-      "subject": "Public Administration",
-      "importance_score": 85,
+      "subject": "Sociology (Optional)",
+      "importance_score": 88,
       "frequency_rank": 6,
-      "important_chapters": "Theories of public administration, Organization theory, Human resource management, Ethics and accountability, Indian administrative system, Service delivery",
-      "important_topics": "Bureaucratic behavior, State capacity, Administrative reforms, E-governance, Grievance redressal, Personnel management, Policy implementation, Good governance",
-      "revision_strategy": "Conceptual clarity in administrative theories. Indian bureaucracy analysis. Case studies in public policy. Ethics-based scenarios. Implementation challenges analysis. Contemporary administrative reforms study."
+      "important_chapters": "Paper 1: Sociology as Science, Thinkers, Stratification, Methods, Work & Economy, Politics & Society, Religion | Paper 2: Indian Society, Caste, Tribal, Social Movements, Social Changes",
+      "important_topics": "Classical thinkers (Marx, Weber, Durkheim), Indian thinkers (Srinivas, Beteille, Ghurye), Caste in modern India, Agrarian change, Women's movement, Dalit assertion, Globalization impact on Indian society",
+      "revision_strategy": "Paper 1: Master 10 thinkers deeply. Paper 2: Use Indian examples extensively. Write 20-mark answers in 12-15 min. Use diagrams. Quote thinkers in every answer. Practice previous year papers."
     }
   ]
 }
