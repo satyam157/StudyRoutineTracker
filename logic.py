@@ -939,16 +939,21 @@ def render_smart_work_section(tips, max_tips=6):
     
     display_tips = tips[:max_tips]
     
+    # Convert markdown **bold** to HTML <strong> tags
+    import re as _re_sw
+    def _md_to_html(text):
+        return _re_sw.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', str(text))
+    
     # Build cards HTML
     cards_html = ""
     for t in display_tips:
+        tip_html = _md_to_html(t['tip'])
         cards_html += f"""
         <div style="
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             border: 1px solid #334155; border-radius: 14px;
             padding: 16px 20px; margin-bottom: 10px;
             border-left: 4px solid #8b5cf6;
-            transition: transform 0.2s ease, border-color 0.2s ease;
         ">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
                 <span style="font-size: 20px;">{t['icon']}</span>
@@ -957,7 +962,7 @@ def render_smart_work_section(tips, max_tips=6):
                 </span>
             </div>
             <div style="font-size: 14px; color: #e2e8f0; line-height: 1.6;">
-                {t['tip']}
+                {tip_html}
             </div>
         </div>
         """

@@ -2903,6 +2903,11 @@ elif menu == "Study Target Manager":
                 </div>
                 """, unsafe_allow_html=True)
                 
+                import re as _re_md
+                def _md(text):
+                    """Convert **bold** markdown to <strong> HTML tags."""
+                    return _re_md.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', str(text))
+                
                 _study_techniques = [
                     {
                         "name": "Active Recall",
@@ -2991,23 +2996,23 @@ elif menu == "Study Target Manager":
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
                             <div>
                                 <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📌 What It Is</div>
-                                {tech['what']}
+                                {_md(tech['what'])}
                             </div>
                             <div>
                                 <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">🔧 How to Apply</div>
-                                {tech['how']}
+                                {_md(tech['how'])}
                             </div>
                             <div>
                                 <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">⏰ When to Use</div>
-                                {tech['when']}
+                                {_md(tech['when'])}
                             </div>
                             <div>
                                 <div style="color: {tech['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px;">📚 Best For Subjects</div>
-                                {tech['subjects']}
+                                {_md(tech['subjects'])}
                             </div>
                         </div>
                         <div style="margin-top: 10px; padding: 8px 14px; background: rgba(139,92,246,0.08); border-radius: 8px; font-size: 12px; color: #a78bfa;">
-                            💡 <strong>Impact:</strong> {tech['impact']}
+                            💡 <strong>Impact:</strong> {_md(tech['impact'])}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -3090,15 +3095,15 @@ elif menu == "Study Target Manager":
                         <div style="font-size: 13px; color: #cbd5e1; line-height: 1.6;">
                             <div style="margin-bottom: 10px;">
                                 <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📌 What It Is: </span>
-                                {method['what']}
+                                {_md(method['what'])}
                             </div>
                             <div style="margin-bottom: 10px;">
                                 <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">📅 Daily Routine: </span>
-                                {method['routine']}
+                                {_md(method['routine'])}
                             </div>
                             <div>
                                 <span style="color: {method['color']}; font-weight: 700; font-size: 11px; text-transform: uppercase;">🔧 How to Apply: </span>
-                                {method['apply']}
+                                {_md(method['apply'])}
                             </div>
                         </div>
                     </div>
