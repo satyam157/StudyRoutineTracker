@@ -1,7 +1,8 @@
 import pandas as pd
 from datetime import datetime, timedelta
 import re
-from database import get_ist_now
+import database
+get_ist_now = database.get_ist_now
 
 study_subjects = [
     "Polity","Ancient","Medieval","Modern","Art&Culture","Economics",

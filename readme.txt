@@ -1,4 +1,4 @@
-**Study Routine Tracker URL: **[Link Text](https://com)
+# Study Routine Tracker
 
 
 pip install -r requirements.txt

@@ -4,7 +4,7 @@ import random
 
 # ------------------ DATABASE ------------------
 def log_love_acceptance(username):
-    from database import get_fresh_cursor
+    import database; get_fresh_cursor = database.get_fresh_cursor
     try:
         tmp_conn, tmp_cur = get_fresh_cursor()
         msg = "💖 YES! I have officially accepted to be your Girlfriend! 💖"
@@ -22,7 +22,7 @@ def log_love_acceptance(username):
         recipients.extend([r[0] for r in tmp_cur.fetchall()])
         
         for recipient in set(recipients):
-            from database import get_ist_now
+            import database; get_ist_now = database.get_ist_now
             tmp_cur.execute(
                 "INSERT INTO system_notifications (username, message, recipient, timestamp) VALUES (%s, %s, %s, %s)",
                 (username, msg, recipient, get_ist_now()),
@@ -35,9 +35,9 @@ def log_love_acceptance(username):
 
 
 def send_love_notification(sender, message, recipient):
-    from database import conn, c
+    import database; conn = database.conn; c = database.c
     try:
-        from database import get_ist_now
+        import database; get_ist_now = database.get_ist_now
         c.execute(
             "INSERT INTO system_notifications (username, message, recipient, timestamp) VALUES (%s, %s, %s, %s)",
             (sender, message, recipient, get_ist_now()),
@@ -48,7 +48,7 @@ def send_love_notification(sender, message, recipient):
 
 
 def notify_page_open(username):
-    from database import get_fresh_cursor
+    import database; get_fresh_cursor = database.get_fresh_cursor
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         recipients = ['admin']
@@ -58,7 +58,7 @@ def notify_page_open(username):
         recipients.extend([r[0] for r in tmp_c.fetchall()])
         msg = f"🔔 {username} has opened the MyLove Special page! 💌"
         for recipient in set(recipients):
-            from database import get_ist_now
+            import database; get_ist_now = database.get_ist_now
             tmp_c.execute(
                 "INSERT INTO system_notifications (username, message, recipient, timestamp) VALUES (%s, %s, %s, %s)",
                 (username, msg, recipient, get_ist_now()),
@@ -71,7 +71,7 @@ def notify_page_open(username):
 
 
 def log_no_rejection(username):
-    from database import get_fresh_cursor
+    import database; get_fresh_cursor = database.get_fresh_cursor
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         recipients = ['admin']
@@ -81,7 +81,7 @@ def log_no_rejection(username):
         recipients.extend([r[0] for r in tmp_c.fetchall()])
         msg = f"💔 Oh no! {username} just clicked 'NO' on the proposal! 😢"
         for recipient in set(recipients):
-            from database import get_ist_now
+            import database; get_ist_now = database.get_ist_now
             tmp_c.execute(
                 "INSERT INTO system_notifications (username, message, recipient, timestamp) VALUES (%s, %s, %s, %s)",
                 (username, msg, recipient, get_ist_now()),
@@ -97,7 +97,7 @@ def log_no_rejection(username):
 # ------------------ NOTIFICATIONS ------------------
 
 def get_latest_love_notifications(recipient):
-    from database import conn, c
+    import database; conn = database.conn; c = database.c
     try:
         c.execute("""
             SELECT id, message, timestamp, username, is_hidden 
@@ -111,7 +111,7 @@ def get_latest_love_notifications(recipient):
 
 
 def mark_notification_read(notif_id):
-    from database import conn, c
+    import database; conn = database.conn; c = database.c
     try:
         c.execute("UPDATE system_notifications SET is_read = TRUE WHERE id = %s", (notif_id,))
         conn.commit()
@@ -120,7 +120,7 @@ def mark_notification_read(notif_id):
 
 
 def delete_notification(notif_id):
-    from database import get_fresh_cursor
+    import database; get_fresh_cursor = database.get_fresh_cursor
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         tmp_c.execute("DELETE FROM system_notifications WHERE id = %s", (notif_id,))
@@ -132,7 +132,7 @@ def delete_notification(notif_id):
 
 
 def toggle_notification_visibility(notif_id, set_hidden):
-    from database import get_fresh_cursor
+    import database; get_fresh_cursor = database.get_fresh_cursor
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         tmp_c.execute("UPDATE system_notifications SET is_hidden = %s WHERE id = %s", (set_hidden, notif_id))
@@ -145,7 +145,7 @@ def toggle_notification_visibility(notif_id, set_hidden):
 
 
 def get_all_love_notifications(recipient):
-    from database import conn, c
+    import database; conn = database.conn; c = database.c
     try:
         c.execute("""
             SELECT id, message, timestamp, username, is_hidden 
@@ -244,7 +244,7 @@ def show_admin_notifications(recipient='admin', mode='all'):
         return
 
     # Fetch user config for permissions
-    from database import get_user_config
+    import database; get_user_config = database.get_user_config
     config = get_user_config(recipient)
     
     # Determine permission based on mode
@@ -355,7 +355,7 @@ def show_admin_notifications(recipient='admin', mode='all'):
     if can_delete:
         st.divider()
         if st.button(f"🗑️ Clear {mode.capitalize()} History", width='stretch', key=f"clear_{mode}_{recipient}"):
-            from database import get_fresh_cursor
+            import database; get_fresh_cursor = database.get_fresh_cursor
             tmp_conn, tmp_c = get_fresh_cursor()
             if tmp_c:
                 try:
@@ -388,7 +388,7 @@ def show_admin_notifications(recipient='admin', mode='all'):
 def notify_admins_personal_note(sender, message, target_recipient):
     """Notify admin and users with can_receive_love_notifications when a personal note is sent.
     This creates a system-style notification so it appears in the admin's 'Note Activity' tab."""
-    from database import get_fresh_cursor, get_ist_now
+    import database; get_fresh_cursor = database.get_fresh_cursor; get_ist_now = database.get_ist_now
     try:
         tmp_conn, tmp_c = get_fresh_cursor()
         # Find all admin-like recipients: admin + users with notification privileges

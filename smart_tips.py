@@ -168,14 +168,16 @@ def generate_smart_work_tips(prod_hours=0, waste_hours=0, essential_hours=0,
 
     # ── DATA-DRIVEN TIPS ──
     if waste_hours > 0:
-        if waste_hours > 3:
-            tips.append({"icon": "🚫", "category": "Waste Recovery",
-                "tip": f"**You have {waste_hours:.0f}h of waste time.** Use the '2-Minute Rule': if tempted by distraction, tell yourself 'just 2 more minutes of study.' Install app blockers during study hours.",
-                "priority": 1})
+        if waste_hours >= 2:
+            tips.append({
+                "category": "Rule of Distraction",
+                "tip": f"**You have {format_duration(waste_hours)} of waste time.** Use the '2-Minute Rule': if tempted by distraction, tell yourself 'just 2 more minutes of study.' Install app blockers during study hours.",
+                "icon": "⏳", "priority": 1})
         elif waste_hours > 1:
-            tips.append({"icon": "⏰", "category": "Time Boxing",
-                "tip": f"**{waste_hours:.0f}h waste is recoverable.** Schedule specific 'guilt-free' leisure slots (e.g., 7-8 PM). Outside those slots, phone stays in another room.",
-                "priority": 2})
+            tips.append({
+                "category": "Controlled Leisure",
+                "tip": f"**{format_duration(waste_hours)} waste is recoverable.** Schedule specific 'guilt-free' leisure slots (e.g., 7-8 PM). Outside those slots, phone stays in another room.",
+                "icon": "📱", "priority": 2})
 
     if focus_pct < 30:
         tips.append({"icon": "🔬", "category": "Deep Work",
@@ -206,9 +208,10 @@ def generate_smart_work_tips(prod_hours=0, waste_hours=0, essential_hours=0,
                 "priority": 3})
 
     if essential_hours > 0:
-        tips.append({"icon": "⚖️", "category": "Work + Study Balance",
-            "tip": f"**You have {essential_hours:.0f}h of work/coaching.** Use 'Sandwich Technique': study 1h BEFORE work, 2-3h AFTER. Lunch break = flashcard revision. Commute = podcasts.",
-            "priority": 2})
+        tips.append({
+            "category": "Work + Study Balance",
+            "tip": f"**You have {format_duration(essential_hours)} of work/coaching.** Use 'Sandwich Technique': study 1h BEFORE work, 2-3h AFTER. Lunch break = flashcard revision. Commute = podcasts.",
+            "icon": "⚖️", "priority": 2})
 
     if subject_count > 5:
         tips.append({"icon": "🔄", "category": "Subject Rotation",

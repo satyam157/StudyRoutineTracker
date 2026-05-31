@@ -243,17 +243,9 @@ if c is not None:
         )
         """)
 
-        try:
-            c.execute("SELECT COUNT(*) FROM users")
-            if c.fetchone()[0] == 0:
-                c.execute("INSERT INTO users (username, password) VALUES ('admin', 'rishav')")
-                c.execute("INSERT INTO users (username, password) VALUES ('harsh', 'bro')")
-                c.execute("INSERT INTO users (username, password) VALUES ('esu', 'satyam')")
-                c.execute("INSERT INTO users (username, password) VALUES ('rishika', 'love')")
-                c.execute("INSERT INTO users (username, password) VALUES ('love', 'esu')")
-                c.execute("INSERT INTO users (username, password) VALUES ('foryou', 'mylove')")
-        except Exception as e:
-            print(f"Error seeding users: {e}")
+        # NOTE: User accounts are managed directly in the database.
+        # No users are seeded from code — add/manage them via the 'Manage Users' page
+        # or directly in PostgreSQL to keep credentials out of source control.
 
         try:
             c.execute("ALTER TABLE activities ADD COLUMN amount REAL")
@@ -331,6 +323,10 @@ if c is not None:
             c.execute("ALTER TABLE activities ADD COLUMN description TEXT")
         except Exception:
             pass
+        try:
+            c.execute("ALTER TABLE activities ADD COLUMN status TEXT DEFAULT 'Completed'")
+        except Exception:
+            pass
 
         c.execute("""
         CREATE TABLE IF NOT EXISTS system_notifications (
@@ -372,8 +368,6 @@ if c is not None:
         # Sync user_config with existing users
         try:
             c.execute("INSERT INTO user_config (username) SELECT username FROM users ON CONFLICT DO NOTHING")
-            # Default for 'foryou'
-            c.execute("UPDATE user_config SET can_view_mylove_special = TRUE, can_receive_love_messages = TRUE WHERE username = 'foryou'")
             conn.commit()
         except:
             pass

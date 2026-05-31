@@ -1,10 +1,30 @@
+# Secrets & credentials — NEVER commit these
 .env
+.env.*
+*.env
+secrets.toml
+.streamlit/secrets.toml
+secret
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# Docs (contain sensitive info)
 readme.txt
 readme.md
+
+# IDEs & editors
 .idea/
+.vscode/
+
+# Virtual environments
 esu-env/
 venv/
 .venv/
 env/
+
+# OS files
+.DS_Store
+Thumbs.db
