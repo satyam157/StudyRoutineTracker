@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import datetime as dt_module
+import plotly.graph_objects as go
+import plotly.express as px
 from utils import *
 from logic import *
 import database

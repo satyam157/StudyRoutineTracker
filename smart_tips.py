@@ -4,6 +4,7 @@ exam paper-attempting strategies, pagination & scroll support.
 """
 import re as _re_sw
 import random
+from utils import format_duration
 
 # ══════════════════════════════════════════════════════════════════
 #  TIP CATEGORIES
@@ -287,16 +288,17 @@ def render_smart_work_section(tips, max_tips=6, page_key="sw_page"):
         tip_html = _md_to_html(t['tip'])
         border = _get_border_color(t['category'])
         cards_html += (
-            f'<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);'
-            f'border:1px solid #334155;border-radius:14px;padding:16px 20px;margin-bottom:10px;'
-            f'border-left:4px solid {border};transition:transform 0.2s,box-shadow 0.2s;"'
-            f' onmouseover="this.style.transform=\'translateX(4px)\';this.style.boxShadow=\'0 4px 20px rgba(0,0,0,0.3)\'"'
-            f' onmouseout="this.style.transform=\'none\';this.style.boxShadow=\'none\'">'
-            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
-            f'<span style="font-size:20px;">{t["icon"]}</span>'
-            f'<span style="font-size:13px;font-weight:700;color:{border};text-transform:uppercase;'
-            f'letter-spacing:0.5px;">{t["category"]}</span></div>'
-            f'<div style="font-size:14px;color:#e2e8f0;line-height:1.6;">{tip_html}</div></div>'
+            f'<div style="background:rgba(30, 41, 59, 0.6);'
+            f'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);'
+            f'border:1px solid rgba(255, 255, 255, 0.08);border-radius:16px;padding:18px 22px;margin-bottom:16px;'
+            f'border-left:5px solid {border};transition:all 0.3s ease;box-shadow:0 4px 15px rgba(0,0,0,0.1);"'
+            f' onmouseover="this.style.transform=\'translateY(-3px) scale(1.01)\';this.style.boxShadow=\'0 8px 25px rgba(0,0,0,0.25)\';this.style.background=\'rgba(30, 41, 59, 0.85)\'"'
+            f' onmouseout="this.style.transform=\'none\';this.style.boxShadow=\'0 4px 15px rgba(0,0,0,0.1)\';this.style.background=\'rgba(30, 41, 59, 0.6)\'">'
+            f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">'
+            f'<div style="font-size:22px;background:rgba(255,255,255,0.05);padding:8px;border-radius:12px;display:flex;align-items:center;justify-content:center;">{t["icon"]}</div>'
+            f'<span style="font-size:14px;font-weight:800;color:{border};text-transform:uppercase;'
+            f'letter-spacing:1px;">{t["category"]}</span></div>'
+            f'<div style="font-size:14.5px;color:#cbd5e1;line-height:1.7;">{tip_html}</div></div>'
         )
 
     total = len(display_tips)
@@ -306,16 +308,19 @@ def render_smart_work_section(tips, max_tips=6, page_key="sw_page"):
     )
 
     html = (
-        f'<div style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e3a5f 100%);'
-        f'padding:20px 22px 10px 22px;border-radius:16px;border:1px solid #4f46e5;margin:20px 0;'
-        f'box-shadow:0 8px 32px rgba(79,70,229,0.15);">'
-        f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">'
-        f'<span style="font-size:26px;">⚡</span>'
-        f'<h3 style="margin:0;color:#e0e7ff;font-weight:800;letter-spacing:-0.3px;">Smart Work Tips</h3>'
-        f'<span style="font-size:12px;color:#818cf8;background:rgba(129,140,248,0.15);'
-        f'padding:3px 10px;border-radius:20px;font-weight:600;">UPSC Strategy Engine</span></div>'
-        f'<div style="max-height:500px;overflow-y:auto;padding-right:6px;'
-        f'scrollbar-width:thin;scrollbar-color:#4f46e5 transparent;">'
-        f'{cards_html}</div>{counter_html}</div>'
+        f'<div style="background:linear-gradient(145deg, #1e1b4b 0%, #0f172a 100%);'
+        f'padding:24px 28px 16px 28px;border-radius:20px;border:1px solid rgba(79,70,229,0.3);margin:24px 0;'
+        f'box-shadow:0 12px 40px rgba(0,0,0,0.3); position: relative; overflow: hidden;">'
+        f'<div style="position:absolute;top:-50px;right:-50px;width:150px;height:150px;background:radial-gradient(circle, rgba(79,70,229,0.15) 0%, transparent 70%);border-radius:50%;"></div>'
+        f'<div style="position:absolute;bottom:-30px;left:-30px;width:100px;height:100px;background:radial-gradient(circle, rgba(56,189,248,0.1) 0%, transparent 70%);border-radius:50%;"></div>'
+        f'<div style="position:relative;z-index:1;">'
+        f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">'
+        f'<span style="font-size:28px;">💡</span>'
+        f'<h3 style="margin:0;color:#f8fafc;font-weight:900;letter-spacing:-0.5px;font-size:22px;">Smart Work Tips</h3>'
+        f'<span style="font-size:11px;color:#a78bfa;background:rgba(167,139,250,0.1);'
+        f'padding:4px 12px;border-radius:24px;font-weight:700;text-transform:uppercase;letter-spacing:1px;border:1px solid rgba(167,139,250,0.2);">UPSC Strategy Engine</span></div>'
+        f'<div style="max-height:550px;overflow-y:auto;padding-right:10px;'
+        f'scrollbar-width:thin;scrollbar-color:rgba(79,70,229,0.5) transparent;">'
+        f'{cards_html}</div>{counter_html}</div></div>'
     )
     return html

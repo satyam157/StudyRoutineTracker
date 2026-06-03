@@ -121,33 +121,76 @@ def render(USER, USER_CONFIG):
             custom_type_map = {}
             custom_track_map = {}
     
-        # Check if we are editing a draft
+        # Check if we have a saved draft
         draft_activity_type = None
         draft_subject = None
         draft_chapter = None
         draft_desc = None
-        
-        # We need to find if any editing_draft_* is set
         active_draft_id = None
-        for key in list(st.session_state.keys()):
-            if key.startswith("editing_draft_") and st.session_state[key]:
-                active_draft_id = st.session_state[key]
-                break
+        draft_start_time = ""
+        draft_duration = 0.0
+        
+        try:
+            draft_df = read_sql("SELECT id, type, subject, chapter, description, start_time, duration FROM activities WHERE username=%s AND status='Draft' LIMIT 1", (USER,))
+            if not draft_df.empty:
+                d_row = draft_df.iloc[0]
+                active_draft_id = d_row['id']
+                draft_activity_type = d_row['type']
+                draft_subject = d_row['subject']
+                draft_chapter = d_row['chapter']
+                draft_desc = d_row['description']
+                draft_start_time = d_row.get('start_time', "") or ""
+                draft_duration = d_row.get('duration', 0.0) or 0.0
                 
-        if active_draft_id:
-            try:
-                draft_df = read_sql("SELECT type, subject, chapter, description FROM activities WHERE id=%s", (active_draft_id,))
-                if not draft_df.empty:
-                    d_row = draft_df.iloc[0]
-                    draft_activity_type = d_row['type']
-                    draft_subject = d_row['subject']
-                    draft_chapter = d_row['chapter']
-                    draft_desc = d_row['description']
-                    
-                    # Temporarily override user defaults for this activity
+                # Check if we need to force load this draft into the UI
+                if st.session_state.get("last_loaded_draft_id") != active_draft_id:
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("de_"):
+                            del st.session_state[k]
+                    st.session_state["last_loaded_draft_id"] = active_draft_id
+                    st.rerun()
+                
+                # Temporarily override user defaults for this activity
+                if draft_activity_type:
                     _user_defaults[draft_activity_type] = (draft_subject or "", draft_chapter or "")
-            except:
-                pass
+        except:
+            if "last_loaded_draft_id" in st.session_state:
+                del st.session_state["last_loaded_draft_id"]
+
+        # Check if we are editing an existing entry (redirected from the list below)
+        _editing_entry = st.session_state.get("editing_entry", None)
+        _editing_entry_id = None
+        if _editing_entry:
+            _editing_entry_id = _editing_entry.get("id")
+            _edit_type = _editing_entry.get("type", "")
+            _edit_sub = _editing_entry.get("subject", "")
+            _edit_ch = _editing_entry.get("chapter", "")
+            _edit_desc = _editing_entry.get("description", "")
+            _edit_dur = _editing_entry.get("duration", 0.0)
+            _edit_amt = _editing_entry.get("amount", 0.0)
+            _edit_st = _editing_entry.get("start_time", "")
+            # Override defaults so the main form pre-fills correctly
+            if _edit_type:
+                draft_activity_type = _edit_type
+                draft_subject = _edit_sub
+                draft_chapter = _edit_ch
+                draft_desc = _edit_desc
+                _user_defaults[_edit_type] = (_edit_sub or "", _edit_ch or "")
+
+        # Show editing banner if editing
+        if _editing_entry_id:
+            st.markdown(f"""<div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #f59e0b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size:15px; font-weight:700; color:#fbbf24;">✏️ Editing Entry #{_editing_entry_id} — {_editing_entry.get('type', '')}</span>
+                <span style="font-size:12px; color:#94a3b8;">Fill in the fields below and click Submit to save changes</span>
+            </div>""", unsafe_allow_html=True)
+            _cancel_col1, _cancel_col2 = st.columns([3, 1])
+            with _cancel_col2:
+                if st.button("❌ Cancel Edit", key="cancel_editing_entry", use_container_width=True):
+                    del st.session_state["editing_entry"]
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("de_"):
+                            del st.session_state[k]
+                    st.rerun()
 
         # Activity selection with inline delete
         _act_col, _del_col = st.columns([3, 1])
@@ -155,6 +198,13 @@ def render(USER, USER_CONFIG):
             _all_acts = base_activities + custom + ["+ Add New"]
             _def_act_idx = _all_acts.index(draft_activity_type) if draft_activity_type in _all_acts else 0
             activity = st.selectbox("Activity", _all_acts, index=_def_act_idx)
+            
+            if st.session_state.get("last_selected_activity") != activity:
+                for k in list(st.session_state.keys()):
+                    if k.startswith("de_"):
+                        del st.session_state[k]
+                st.session_state["last_selected_activity"] = activity
+                st.rerun()
         
         with _del_col:
             if activity in custom:
@@ -426,9 +476,19 @@ def render(USER, USER_CONFIG):
             _track_both = (custom_track_map.get(activity) == "Expense (₹)")
             _track_by_expense = False
     
-        description = st.text_input("📝 Description (Optional)", value=draft_desc if (active_draft_id and draft_activity_type == activity and draft_desc) else "", key=f"de_desc_{activity}")
+        _desc_default = ""
+        if _editing_entry_id and _editing_entry.get('type') == activity and _edit_desc:
+            _desc_default = _edit_desc
+        elif active_draft_id and draft_activity_type == activity and draft_desc:
+            _desc_default = draft_desc
+        description = st.text_input("📝 Description (Optional)", value=_desc_default, key=f"de_desc_{activity}")
+        
+        if not _editing_entry_id:
+            pass
     
-        _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=1, horizontal=True, key=f"de_dur_mode_{activity}")
+        _def_dur_mode_idx = 1
+                
+        _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=_def_dur_mode_idx, horizontal=True, key=f"de_dur_mode_{activity}")
         
         duration = 0.0
         amount = 0.0
@@ -439,25 +499,66 @@ def render(USER, USER_CONFIG):
     
         def parse_time_value(raw):
             try:
-                if ":" in str(raw):
-                    h, m = str(raw).split(":", 1)
-                    return int(h), int(m)
-                return int(raw), 0
+                if not raw: return None
+                raw_str = str(raw).strip().lower()
+                is_pm = 'pm' in raw_str or 'p.m.' in raw_str
+                is_am = 'am' in raw_str or 'a.m.' in raw_str
+                
+                raw_str = raw_str.replace('.', ':')
+                import re
+                clean_raw = re.sub(r'[^\d:]', '', raw_str)
+                if not clean_raw: return None
+                
+                if ":" in clean_raw:
+                    parts = clean_raw.split(":", 1)
+                    h = int(parts[0]) if parts[0] else 0
+                    m = int(parts[1]) if parts[1] else 0
+                else:
+                    if len(clean_raw) == 3 or len(clean_raw) == 4:
+                        h = int(clean_raw[:-2])
+                        m = int(clean_raw[-2:])
+                    else:
+                        h, m = int(clean_raw), 0
+                        
+                if is_pm and h < 12: h += 12
+                elif is_am and h == 12: h = 0
+                h = h % 24
+                return h, m
             except: return None
     
         if _duration_mode == "Hours":
+            _def_dur = float(_edit_dur) if (_editing_entry_id and _editing_entry.get('type') == activity) else 0.0
+            _def_amt = float(_edit_amt) if (_editing_entry_id and _editing_entry.get('type') == activity) else 0.0
             if _track_both:
                 c1, c2 = st.columns(2)
-                with c1: duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=0.0, key=f"de_hours_{activity}")
-                with c2: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0, key=f"de_amount_{activity}")
+                with c1: duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=_def_dur, key=f"de_hours_{activity}")
+                with c2: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=_def_amt, key=f"de_amount_{activity}")
             elif _track_by_expense:
-                amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0)
+                amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=_def_amt)
             else:
-                duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=0.0)
+                duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=_def_dur)
         else:
+            _def_st = _edit_st if (_editing_entry_id and _editing_entry.get('type') == activity) else (draft_start_time if (active_draft_id and draft_activity_type == activity) else "")
+            _def_to = ""
+            if _def_st:
+                _dur_to_use = _edit_dur if (_editing_entry_id and _editing_entry.get('type') == activity) else (draft_duration if (active_draft_id and draft_activity_type == activity) else 0.0)
+                if _dur_to_use > 0:
+                    try:
+                        f_h, f_m = map(int, _def_st.split(":"))
+                        total_mins = int(f_h * 60 + f_m + float(_dur_to_use) * 60)
+                        t_h = (total_mins // 60) % 24
+                        t_m = total_mins % 60
+                        _def_to = f"{t_h}:{t_m:02d}"
+                    except:
+                        pass
+            _def_amt = float(_edit_amt) if (_editing_entry_id and _editing_entry.get('type') == activity) else 0.0
+            
             c1, c2 = st.columns(2)
-            with c1: from_time_raw = st.text_input("From Time", key=f"de_from_{activity}", placeholder="2:30 PM")
-            with c2: to_time_raw = st.text_input("To Time", key=f"de_to_{activity}", placeholder="4:45 PM")
+            with c1: 
+                from_time_raw = st.text_input("From Time", value=_def_st, key=f"de_from_{activity}", placeholder="2:30 PM")
+            with c2: 
+                to_time_raw = st.text_input("To Time", value=_def_to, key=f"de_to_{activity}", placeholder="4:45 PM")
+            
             if from_time_raw and to_time_raw:
                 f_p, t_p = parse_time_value(from_time_raw), parse_time_value(to_time_raw)
                 if f_p and t_p:
@@ -471,52 +572,86 @@ def render(USER, USER_CONFIG):
                         duration_tomorrow = t_mins / 60
                         duration = duration_today + duration_tomorrow
                     else: duration = (t_mins - f_mins) / 60
-                    st.caption(f"Duration: **{duration:.1f} hours**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
-            if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=0.0, key=f"de_amt_tr_{activity}")
+                    st.caption(f"Duration: **{format_duration(duration)}**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
+            if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=_def_amt if _duration_mode != "Hours" else 0.0, key=f"de_amt_tr_{activity}")
         
-        # Load draft data if editing
-        edit_draft_id = st.session_state.get(f"editing_draft_{activity}", None)
+        
+        save_draft_clicked = False
+        if not _editing_entry_id:
+            save_draft_clicked = st.button("📝 Save to Draft", key=f"btn_save_draft_main_{activity}", use_container_width=True)
+            
+        if save_draft_clicked:
+            st_val = start_time
+            dur = duration
+            if _duration_mode == "Time Range (From-To)":
+                if from_time_raw:
+                    f_p = parse_time_value(from_time_raw)
+                    if f_p:
+                        from_h, from_m = f_p
+                        st_val = f"{from_h}:{from_m:02d}"
+            
+            c.execute("DELETE FROM activities WHERE username=%s AND status='Draft'", (USER,))
+            c.execute("INSERT INTO activities (username, date, type, subject, chapter, start_time, duration, amount, description, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (USER, str(date), activity, sub1, sub2, st_val, dur, amount, description, 'Draft'))
+            conn.commit()
+            
+            st.toast("✅ Draft saved successfully!", icon="✅")
+            import time; time.sleep(1); st.rerun()
 
-        col_save1, col_save2 = st.columns(2)
-        with col_save1:
-            save_clicked = st.button("💾 Submit Activity", key="submit_main_activity", use_container_width=True)
-        with col_save2:
-            draft_clicked = st.button("📝 Save Entry (Draft)", key="save_draft_activity", use_container_width=True)
+        _submit_label = "💾 Update Activity" if _editing_entry_id else "💾 Submit Activity"
+        save_clicked = st.button(_submit_label, key="submit_main_activity", use_container_width=True)
 
-        if save_clicked or draft_clicked:
-            if duration > 0 or amount > 0 or draft_clicked:
-                entry_status = 'Draft' if draft_clicked else 'Completed'
-                if edit_draft_id:
-                    c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (edit_draft_id, USER))
-                
+
+
+        if save_clicked:
+            entry_status = 'Completed'
+            
+            # Delete any active draft when submitting
+            c.execute("DELETE FROM activities WHERE username=%s AND status='Draft'", (USER,))
+            
+            if _editing_entry_id:
+                # UPDATE the existing entry instead of inserting a new one
+                if is_midnight_crossing:
+                    # For midnight crossing edits, update original and insert the next-day part
+                    c.execute(
+                        "UPDATE activities SET type=%s, subject=%s, chapter=%s, duration=%s, amount=%s, start_time=%s, description=%s, status=%s WHERE id=%s AND username=%s",
+                        (activity, sub1, sub2, duration_today, amount, f"{from_h}:{from_m:02d}", description, entry_status, _editing_entry_id, USER)
+                    )
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}", description, entry_status))
+                else:
+                    c.execute(
+                        "UPDATE activities SET type=%s, subject=%s, chapter=%s, duration=%s, amount=%s, start_time=%s, description=%s, status=%s WHERE id=%s AND username=%s",
+                        (activity, sub1, sub2, duration, amount, start_time, description, entry_status, _editing_entry_id, USER)
+                    )
+                # Clear editing state
+                if "editing_entry" in st.session_state:
+                    del st.session_state["editing_entry"]
+            else:
+                # Normal insert
                 if is_midnight_crossing:
                     c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration_today, amount, USER, f"{from_h}:{from_m:02d}", description, entry_status))
                     c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}", description, entry_status))
                 else:
                     c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration, amount, USER, start_time, description, entry_status))
 
-                conn.commit()
-                if activity.strip().lower() == "powernap":
-                    try:
-                        if is_midnight_crossing:
-                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration_today))
-                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date + timedelta(days=1)), duration_tomorrow))
-                        else:
-                            c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration))
-                        conn.commit()
-                    except: pass
-                if edit_draft_id:
-                    st.session_state[f"editing_draft_{activity}"] = None
-                
-                msg = "Draft saved!" if draft_clicked else "Activity saved!"
-                st.toast(f"✅ {msg}", icon="✅")
-                import time; time.sleep(1); st.rerun()
-            else: st.warning("Enter duration/amount.")
+            conn.commit()
+            if activity.strip().lower() == "powernap":
+                try:
+                    if is_midnight_crossing:
+                        c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration_today))
+                        c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date + timedelta(days=1)), duration_tomorrow))
+                    else:
+                        c.execute("INSERT INTO health_logs (username, date, powernap) VALUES (%s, %s, %s) ON CONFLICT (username, date) DO UPDATE SET powernap = COALESCE(health_logs.powernap, 0) + EXCLUDED.powernap", (USER, str(date), duration))
+                    conn.commit()
+                except: pass
+            
+            _msg = "✅ Activity updated!" if _editing_entry_id else "✅ Activity saved!"
+            st.toast(_msg, icon="✅")
+            import time; time.sleep(1); st.rerun()
 
     
         st.divider()
         st.markdown("### 📋 Activities Logged")
-        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time, description, COALESCE(status, 'Completed') as status FROM activities WHERE date=%s AND username=%s ORDER BY id", (str(date), USER))
+        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time, description, COALESCE(status, 'Completed') as status FROM activities WHERE date=%s AND username=%s AND COALESCE(status, 'Completed') != 'Draft' ORDER BY id", (str(date), USER))
         if _today_df.empty: st.caption("No activities logged for this date.")
         else:
             for _, _row in _today_df.iterrows():
@@ -527,40 +662,65 @@ def render(USER, USER_CONFIG):
                 st_v = _row.get('start_time') or ""
                 if ch: parts.append(ch)
                 if st_v: parts.append(f"[{st_v}]")
-                val = format_duration(_row['duration']) if _row['duration'] > 0 else (f"₹{_row['amount']}" if _row['amount'] > 0 else "")
+                _has_time = (_row['duration'] and float(_row['duration']) > 0) or (_row['amount'] and float(_row['amount']) > 0)
+                val = format_duration(_row['duration']) if _row['duration'] and float(_row['duration']) > 0 else (f"₹{_row['amount']}" if _row['amount'] and float(_row['amount']) > 0 else "")
                 if val: parts.append(val)
                 
-                status_icon = "📝 Draft" if _row['status'] == 'Draft' else ""
-                
-                l, c, r = st.columns([4, 1, 1])
+                l, r_edit, r_del = st.columns([4, 0.5, 0.5])
                 
                 raw_desc = _row.get('description')
                 desc_text = ""
                 if raw_desc and str(raw_desc).strip() and str(raw_desc).strip().lower() not in ('none', 'nan', 'null'):
                     desc_text = f"<br><span style='font-size:12px; color:#94a3b8;'>{str(raw_desc).strip()}</span>"
                 
-                status_html = f" <span style='color:#fbbf24; font-size:12px;'>{status_icon}</span>" if status_icon else ""
-                l.markdown(f"• **{' | '.join(parts)}**{status_html}{desc_text}", unsafe_allow_html=True)
+                if _has_time:
+                    l.markdown(f"• **{' | '.join(parts)}**{desc_text}", unsafe_allow_html=True)
+                else:
+                    _no_time_label = ' | '.join(parts)
+                    l.markdown(f"""<div style="background: rgba(251, 191, 36, 0.1); border-left: 3px solid #f59e0b; padding: 6px 10px; border-radius: 6px; margin: 2px 0;">
+                        <span style="color: #fbbf24; font-weight: 600;">⏳ {_no_time_label}</span>
+                        <span style="font-size: 11px; color: #f59e0b; margin-left: 6px;">(no time logged)</span>{desc_text}
+                    </div>""", unsafe_allow_html=True)
                 
-                if _row['status'] == 'Draft':
-                    if c.button("✏️", key=f"edit_daily_{rid}"):
-                        st.session_state[f"editing_draft_{activity}"] = rid
-                        st.rerun()
+                # Edit button — redirect to main form pre-filled with this entry's values
+                if r_edit.button("✏️", key=f"edit_daily_{rid}"):
+                    _e_dur = float(_row['duration']) if _row['duration'] else 0.0
+                    _e_amt = float(_row['amount']) if _row['amount'] else 0.0
+                    _e_sub = str(_row['subject']) if _row['subject'] and str(_row['subject']).strip().lower() not in ('none', 'nan', 'null') else ""
+                    _e_ch = str(_row['chapter']) if _row['chapter'] and str(_row['chapter']).strip().lower() not in ('none', 'nan', 'null') else ""
+                    _e_st = str(_row['start_time']) if _row['start_time'] and str(_row['start_time']).strip().lower() not in ('none', 'nan', 'null') else ""
+                    _e_desc = str(raw_desc).strip() if raw_desc and str(raw_desc).strip().lower() not in ('none', 'nan', 'null') else ""
+                    st.session_state["editing_entry"] = {
+                        "id": rid,
+                        "type": _row['type'],
+                        "subject": _e_sub,
+                        "chapter": _e_ch,
+                        "duration": _e_dur,
+                        "amount": _e_amt,
+                        "start_time": _e_st,
+                        "description": _e_desc,
+                    }
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("de_"):
+                            del st.session_state[k]
+                    st.rerun()
                 
-                if r.button("🗑️", key=f"del_daily_{rid}"):
+                # Delete button
+                if r_del.button("🗑️", key=f"del_daily_{rid}"):
                     st.session_state[f"confirm_daily_del_{rid}"] = True
                 
+                # --- Delete Confirmation ---
                 if st.session_state.get(f"confirm_daily_del_{rid}", False):
                     st.warning("Delete this entry?", icon="⚠️")
                     yc, nc = st.columns([1, 1])
                     with yc:
-                        if st.button("✅ Yes", key=f"yes_daily_del_{rid}", width='stretch'):
-                            c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (rid, USER))
-                            conn.commit()
+                        if st.button("✅ Yes", key=f"yes_daily_del_{rid}", use_container_width=True):
+                            database.c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (rid, USER))
+                            database.conn.commit()
                             st.session_state[f"confirm_daily_del_{rid}"] = False
                             st.rerun()
                     with nc:
-                        if st.button("❌ No", key=f"no_daily_del_{rid}", width='stretch'):
+                        if st.button("❌ No", key=f"no_daily_del_{rid}", use_container_width=True):
                             st.session_state[f"confirm_daily_del_{rid}"] = False
                             st.rerun()
     

@@ -113,16 +113,19 @@ def render(USER, USER_CONFIG):
             if not report_df.empty:
                 st.markdown("**📋 Daily Performance Report Table**")
                 # Updated table prioritizing scores
-                st.dataframe(report_df[['date', 'productivity_%', 'waste_%', 'productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']], 
+                disp_df = report_df[['date', 'productivity_%', 'waste_%', 'productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']].copy()
+                for c in ['productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']:
+                    disp_df[c] = disp_df[c].apply(format_duration)
+                st.dataframe(disp_df, 
                              column_config={
                                  "date": "Date",
                                  "productivity_%": st.column_config.ProgressColumn("Productivity (%)", min_value=0, max_value=100, format="%d%%"),
                                  "waste_%": st.column_config.ProgressColumn("Waste (%)", min_value=0, max_value=100, format="%d%%"),
-                                 "productive_hours": st.column_config.NumberColumn("Prod (h)", format="%.1f"),
-                                 "waste_hours": st.column_config.NumberColumn("Waste (h)", format="%.1f"),
-                                 "essential_hours": st.column_config.NumberColumn("Ess (h)", format="%.1f"),
-                                 "sleep_hours": st.column_config.NumberColumn("Sleep (h)", format="%.1f"),
-                                 "powernap": st.column_config.NumberColumn("Nap (h)", format="%.1f")
+                                 "productive_hours": "Prod (h)",
+                                 "waste_hours": "Waste (h)",
+                                 "essential_hours": "Ess (h)",
+                                 "sleep_hours": "Sleep (h)",
+                                 "powernap": "Nap (h)"
                              },
                              width='stretch', hide_index=True)
     
@@ -674,13 +677,16 @@ def render(USER, USER_CONFIG):
             if not tod_df.empty:
                 st.markdown(f"**📊 Hourly Performance Data - {selected_date_td.strftime('%A, %B %d, %Y')}**")
                 # Updated table prioritizing % metrics and removing raw hours as requested
-                st.dataframe(tod_df[['hour', 'productivity_%', 'waste_%', 'productive_hours', 'waste_hours']], 
+                disp_tod_df = tod_df[['hour', 'productivity_%', 'waste_%', 'productive_hours', 'waste_hours']].copy()
+                disp_tod_df['productive_hours'] = disp_tod_df['productive_hours'].apply(format_duration)
+                disp_tod_df['waste_hours'] = disp_tod_df['waste_hours'].apply(format_duration)
+                st.dataframe(disp_tod_df, 
                              column_config={
                                  "hour": "Hour",
                                  "productivity_%": st.column_config.ProgressColumn("Productivity (%)", min_value=0, max_value=100, format="%d%%"),
                                  "waste_%": st.column_config.ProgressColumn("Waste (%)", min_value=0, max_value=100, format="%d%%"),
-                                 "productive_hours": st.column_config.NumberColumn("Prod (h)", format="%.2f"),
-                                 "waste_hours": st.column_config.NumberColumn("Waste (h)", format="%.2f")
+                                 "productive_hours": "Prod (h)",
+                                 "waste_hours": "Waste (h)"
                              },
                              width='stretch', hide_index=True)
     
@@ -806,7 +812,10 @@ def render(USER, USER_CONFIG):
                 daily_m = daily_report(month_df, sleep_data=sleep_hours_dict, powernap_data=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
                 if not daily_m.empty:
                     st.markdown("**📋 Day-by-Day Table**")
-                    st.dataframe(daily_m[['date','productive_hours','essential_hours','waste_hours','sleep_hours','powernap','productivity_%']],
+                    disp_daily_m = daily_m.copy()
+                    for c in ['productive_hours', 'essential_hours', 'waste_hours', 'sleep_hours']:
+                        disp_daily_m[c] = disp_daily_m[c].apply(format_duration)
+                    st.dataframe(disp_daily_m[['date','productive_hours','essential_hours','waste_hours','sleep_hours','powernap','productivity_%']],
                                  width='stretch')
     
                 m_bar_df = pd.DataFrame({
@@ -931,8 +940,6 @@ def render(USER, USER_CONFIG):
                     else:
                         st.caption("⏰ No time-stamped entries found. Log activities with **Time Range (From-To)** to see hourly data.")
     
-                    st.info("💡 Use the **Ask Esu** page to get personalized waste reduction strategies.")
-    
     
     
                 st.divider()
@@ -955,7 +962,9 @@ def render(USER, USER_CONFIG):
                     st.markdown("📅 **Top 10 Weekdays**")
                     top_wd = get_top_study_days(month_df, is_weekend=False)
                     if not top_wd.empty:
-                        st.dataframe(top_wd[['date', 'hours', 'readings']], 
+                        disp_top_wd = top_wd.copy()
+                        disp_top_wd['hours'] = disp_top_wd['hours'].apply(format_duration)
+                        st.dataframe(disp_top_wd[['date', 'hours', 'readings']], 
                                      column_config={"date": "Date", "hours": "Hrs", "readings": "What I was reading"},
                                      hide_index=True, width='stretch')
                     else:
@@ -965,7 +974,9 @@ def render(USER, USER_CONFIG):
                     st.markdown("Weekend **Top 10 Weekends**")
                     top_we = get_top_study_days(month_df, is_weekend=True)
                     if not top_we.empty:
-                        st.dataframe(top_we[['date', 'hours', 'readings']], 
+                        disp_top_we = top_we.copy()
+                        disp_top_we['hours'] = disp_top_we['hours'].apply(format_duration)
+                        st.dataframe(disp_top_we[['date', 'hours', 'readings']], 
                                      column_config={"date": "Date", "hours": "Hrs", "readings": "What I was reading"},
                                      hide_index=True, width='stretch')
                     else:

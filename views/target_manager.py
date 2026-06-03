@@ -173,12 +173,12 @@ def render(USER, USER_CONFIG):
             sub_acts    = act_df[act_df['subject'] == sub].copy()
             sub_acts['clean_ch'] = sub_acts['chapter'].apply(get_clean_chapter)
             
-            hours_taken = round(sub_acts['duration'].sum(), 2)
+            hours_taken = format_duration(sub_acts['duration'].sum())
             days_taken  = sub_acts['date'].nunique()
             _ch_active  = sub_acts[sub_acts['clean_ch'] != ""]
             max_item    = _ch_active.groupby('clean_ch')['duration'].sum().idxmax() if not _ch_active.empty else "N/A"
     
-            label  = f"{round(done,1)}" if goal_unit == _HOURS_TYPE else str(done)
+            label  = f"{format_duration(done)}" if goal_unit == _HOURS_TYPE else str(done)
             icon   = "✅" if percent >= 100 else "🔵"
             header = f"{icon} {sub} — {percent}% ({label}/{total} {goal_unit})"
             if achieved_on:
@@ -214,7 +214,7 @@ def render(USER, USER_CONFIG):
                 mc2.metric("Goal",     f"{total} {goal_unit}")
                 mc3.metric("Done",     f"{label} {goal_unit}")
                 # mc4 was previously mc3 (Progress)
-                mc4.metric("Total Time", f"{hours_taken}h")
+                mc4.metric("Total Time", hours_taken)
                 if achieved_on:
                     mc5.metric("Completed On", str(achieved_on))
                 else:
@@ -559,14 +559,22 @@ def render(USER, USER_CONFIG):
                 """, unsafe_allow_html=True)
                 
                 for tech in _page_techniques:
-                    _t_html = f'<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border:1px solid #334155;border-radius:16px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {tech["color"]};">' \
-                        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><span style="font-size:24px;">{tech["icon"]}</span><span style="font-size:18px;font-weight:800;color:#e2e8f0;">{tech["name"]}</span></div>' \
-                        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;color:#cbd5e1;line-height:1.6;">' \
-                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f4cc What It Is</div>{_md(tech["what"])}</div>' \
-                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f527 How to Apply</div>{_md(tech["how"])}</div>' \
-                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\u23f0 When to Use</div>{_md(tech["when"])}</div>' \
-                        f'<div><div style="color:{tech["color"]};font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:4px;">\U0001f4da Best For Subjects</div>{_md(tech["subjects"])}</div>' \
-                        f'</div><div style="margin-top:10px;padding:8px 14px;background:rgba(139,92,246,0.08);border-radius:8px;font-size:12px;color:#a78bfa;">\U0001f4a1 <strong>Impact:</strong> {_md(tech["impact"])}</div></div>'
+                    _t_html = (
+                        f'<div style="background:rgba(30, 41, 59, 0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);'
+                        f'border:1px solid rgba(255, 255, 255, 0.08);border-radius:16px;padding:20px 24px;margin-bottom:16px;'
+                        f'border-left:5px solid {tech["color"]};transition:all 0.3s ease;box-shadow:0 4px 15px rgba(0,0,0,0.1);"'
+                        f' onmouseover="this.style.transform=\'translateY(-3px) scale(1.01)\';this.style.boxShadow=\'0 8px 25px rgba(0,0,0,0.25)\';this.style.background=\'rgba(30, 41, 59, 0.85)\'"'
+                        f' onmouseout="this.style.transform=\'none\';this.style.boxShadow=\'0 4px 15px rgba(0,0,0,0.1)\';this.style.background=\'rgba(30, 41, 59, 0.6)\'">'
+                        f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">'
+                        f'<div style="font-size:24px;background:rgba(255,255,255,0.05);padding:10px;border-radius:12px;display:flex;align-items:center;justify-content:center;">{tech["icon"]}</div>'
+                        f'<span style="font-size:18px;font-weight:800;color:#f8fafc;letter-spacing:0.5px;">{tech["name"]}</span></div>'
+                        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13.5px;color:#cbd5e1;line-height:1.6;">'
+                        f'<div style="background:rgba(0,0,0,0.2);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);"><div style="color:{tech["color"]};font-weight:800;font-size:11px;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px;">\U0001f4cc What It Is</div>{_md(tech["what"])}</div>'
+                        f'<div style="background:rgba(0,0,0,0.2);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);"><div style="color:{tech["color"]};font-weight:800;font-size:11px;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px;">\U0001f527 How to Apply</div>{_md(tech["how"])}</div>'
+                        f'<div style="background:rgba(0,0,0,0.2);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);"><div style="color:{tech["color"]};font-weight:800;font-size:11px;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px;">\u23f0 When to Use</div>{_md(tech["when"])}</div>'
+                        f'<div style="background:rgba(0,0,0,0.2);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);"><div style="color:{tech["color"]};font-weight:800;font-size:11px;text-transform:uppercase;margin-bottom:6px;letter-spacing:1px;">\U0001f4da Best For Subjects</div>{_md(tech["subjects"])}</div>'
+                        f'</div><div style="margin-top:16px;padding:12px 16px;background:rgba(139,92,246,0.1);border-radius:10px;border:1px solid rgba(139,92,246,0.2);font-size:13px;color:#c4b5fd;">\U0001f4a1 <strong>Impact:</strong> {_md(tech["impact"])}</div></div>'
+                    )
                     st.markdown(_t_html, unsafe_allow_html=True)
                 
                 # ── Pagination controls for Study Techniques ──
@@ -752,13 +760,21 @@ def render(USER, USER_CONFIG):
                 """, unsafe_allow_html=True)
                 
                 for method in _page_methods:
-                    _m_html = f'<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border:1px solid #334155;border-radius:16px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {method["color"]};">' \
-                        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="font-size:24px;">{method["icon"]}</span><span style="font-size:18px;font-weight:800;color:#e2e8f0;">{method["name"]}</span></div>' \
-                        f'<div style="font-size:13px;color:#cbd5e1;line-height:1.6;">' \
-                        f'<div style="margin-bottom:10px;"><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f4cc What It Is: </span>{_md(method["what"])}</div>' \
-                        f'<div style="margin-bottom:10px;"><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f4c5 Daily Routine: </span>{_md(method["routine"])}</div>' \
-                        f'<div><span style="color:{method["color"]};font-weight:700;font-size:11px;text-transform:uppercase;">\U0001f527 How to Apply: </span>{_md(method["apply"])}</div>' \
+                    _m_html = (
+                        f'<div style="background:rgba(30, 41, 59, 0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);'
+                        f'border:1px solid rgba(255, 255, 255, 0.08);border-radius:16px;padding:20px 24px;margin-bottom:16px;'
+                        f'border-left:5px solid {method["color"]};transition:all 0.3s ease;box-shadow:0 4px 15px rgba(0,0,0,0.1);"'
+                        f' onmouseover="this.style.transform=\'translateY(-3px) scale(1.01)\';this.style.boxShadow=\'0 8px 25px rgba(0,0,0,0.25)\';this.style.background=\'rgba(30, 41, 59, 0.85)\'"'
+                        f' onmouseout="this.style.transform=\'none\';this.style.boxShadow=\'0 4px 15px rgba(0,0,0,0.1)\';this.style.background=\'rgba(30, 41, 59, 0.6)\'">'
+                        f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">'
+                        f'<div style="font-size:24px;background:rgba(255,255,255,0.05);padding:10px;border-radius:12px;display:flex;align-items:center;justify-content:center;">{method["icon"]}</div>'
+                        f'<span style="font-size:18px;font-weight:800;color:#f8fafc;letter-spacing:0.5px;">{method["name"]}</span></div>'
+                        f'<div style="display:grid;grid-template-columns:1fr;gap:12px;font-size:14px;color:#cbd5e1;line-height:1.7;">'
+                        f'<div><span style="color:{method["color"]};font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:1px;margin-right:8px;background:rgba(255,255,255,0.05);padding:4px 8px;border-radius:6px;">\U0001f4cc What It Is</span> {_md(method["what"])}</div>'
+                        f'<div><span style="color:{method["color"]};font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:1px;margin-right:8px;background:rgba(255,255,255,0.05);padding:4px 8px;border-radius:6px;">\U0001f4c5 Routine</span> {_md(method["routine"])}</div>'
+                        f'<div><span style="color:{method["color"]};font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:1px;margin-right:8px;background:rgba(255,255,255,0.05);padding:4px 8px;border-radius:6px;">\U0001f527 How to Apply</span> {_md(method["apply"])}</div>'
                         f'</div></div>'
+                    )
                     st.markdown(_m_html, unsafe_allow_html=True)
                 
                 # ── Pagination controls for Productivity Methods ──

@@ -491,7 +491,7 @@ def render(USER, USER_CONFIG):
                         color = "#1e293b"
                         hours_str = "–"
                     
-                    title = f"{date_str}: {daily_prod.get(date_str, 0):.1f} hrs"
+                    title = f"{date_str}: {format_duration(daily_prod.get(date_str, 0))}"
                     html += f"<div style='display:flex; flex-direction:column; align-items:center;'><div class='day-circle' style='background-color: {color}; border-color: {border_color};' title='{title}'>{hours_str if daily_prod.get(date_str, 0) > 0 else ''}</div></div>"
                 else:
                     html += "<div></div>"
