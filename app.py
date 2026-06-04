@@ -19,7 +19,11 @@ import subprocess
 import tempfile
 import time
 
-import database
+try:
+    import database
+except KeyError:
+    time.sleep(0.5)
+    import database
 get_fresh_cursor = database.get_fresh_cursor
 reconnect = database.reconnect
 save_esu_response = database.save_esu_response
@@ -215,7 +219,12 @@ c = database.c
 from streamlit_calendar import calendar
 
 
-from utils import read_sql, get_user_subjects, get_user_defaults, get_all_songs, get_song_url, clean_song_name, get_song_lists
+try:
+    from utils import read_sql, get_user_subjects, get_user_defaults, get_all_songs, get_song_url, clean_song_name, get_song_lists
+except KeyError:
+    import time
+    time.sleep(0.5)
+    from utils import read_sql, get_user_subjects, get_user_defaults, get_all_songs, get_song_url, clean_song_name, get_song_lists
 
 if conn is None:
     st.error("🚨 CRITICAL: PostgreSQL Database Connection Failed! Please ensure PostgreSQL is installed, running locally, and credentials match the .env configuration. The app cannot proceed without a database.")
@@ -277,14 +286,18 @@ if st.sidebar.button("Logout", key="logout_btn", width='stretch'):
 st.sidebar.divider()
 
 menu_options = [
-    "Daily Entry","Calendar","Study Calendar","Social Life","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
+    "Daily Entry","Calendar","Study Calendar","Social Life","Social Media & Calls","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
 ]
 # --- PERMISSIONS & CONFIG ---
 get_user_config = database.get_user_config
 update_user_config = database.update_user_config
 get_allowed_recipients = database.get_allowed_recipients
 set_allowed_recipients = database.set_allowed_recipients
-USER_CONFIG = get_user_config(USER)
+# Cache USER_CONFIG in session state to avoid a fresh DB connection on every render
+_cfg_cache_key = f"_user_config_{USER}"
+if _cfg_cache_key not in st.session_state:
+    st.session_state[_cfg_cache_key] = get_user_config(USER)
+USER_CONFIG = st.session_state[_cfg_cache_key]
 
 # --- GLOBAL SIDEBAR MUSIC PLAYER ---
 
@@ -677,6 +690,9 @@ elif menu == "Calendar":
     render(USER, USER_CONFIG)
 elif menu == "Social Life":
     from views.social_life import render
+    render(USER, USER_CONFIG)
+elif menu == "Social Media & Calls":
+    from views.social_media_call import render
     render(USER, USER_CONFIG)
 elif menu == "Study Calendar":
     from views.study_calendar import render

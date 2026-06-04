@@ -4,7 +4,6 @@ import re
 import glob
 import pandas as pd
 import database
-import database
 supabase_client = database.supabase_client
 STORAGE_BUCKET = database.STORAGE_BUCKET
 get_allowed_recipients = database.get_allowed_recipients
@@ -15,11 +14,15 @@ update_user_config = database.update_user_config
 
 def read_sql(query, params=None):
     """Execute a SELECT query via the psycopg2 cursor and return a pandas DataFrame.
-    Avoids the UserWarning pandas raises when a raw DBAPI2 connection is passed."""
+    Avoids the UserWarning pandas raises when a raw DBAPI2 connection is passed.
+    On failure, retries with a fresh throw-away connection (never crashes on lost connection)."""
+    import time as _t
     database.ensure_connection()
     conn = database.conn
-    
+
     try:
+        if conn is None or getattr(conn, 'closed', 1) != 0:
+            raise Exception("Connection unavailable")
         cur = conn.cursor()
         cur.execute(query, params)
         rows = cur.fetchall()
@@ -27,15 +30,42 @@ def read_sql(query, params=None):
         cur.close()
         return pd.DataFrame(rows, columns=cols)
     except Exception:
-        # One-time retry on failure
-        database.reconnect()
-        conn = database.conn
-        cur = conn.cursor()
-        cur.execute(query, params)
-        rows = cur.fetchall()
-        cols = [desc[0] for desc in cur.description]
-        cur.close()
-        return pd.DataFrame(rows, columns=cols)
+        # Retry with a fresh independent connection so we never crash on a dead conn
+        try:
+            tmp_conn, tmp_cur = database.get_fresh_cursor()
+            if tmp_conn is None or tmp_cur is None:
+                return pd.DataFrame()
+            tmp_cur.execute(query, params)
+            rows = tmp_cur.fetchall()
+            cols = [desc[0] for desc in tmp_cur.description]
+            tmp_cur.close()
+            tmp_conn.close()
+            return pd.DataFrame(rows, columns=cols)
+        except Exception as e2:
+            print(f"read_sql retry failed: {e2}")
+            return pd.DataFrame()
+
+
+def get_activities_df(user, force_refresh=False):
+    """Return the full activities DataFrame for the user, cached in session_state for 60s.
+    Raw data — caller must apply start_time/chapter preprocessing if needed.
+    Call invalidate_activities_cache(user) after any write to the activities table."""
+    import time as _t
+    _cache_key = f"_act_df_{user}"
+    _ts_key = f"_act_df_ts_{user}"
+    now = _t.time()
+    is_stale = (now - st.session_state.get(_ts_key, 0)) > 60
+    if force_refresh or _cache_key not in st.session_state or is_stale:
+        df = read_sql("SELECT * FROM activities WHERE username=%s", (user,))
+        st.session_state[_cache_key] = df
+        st.session_state[_ts_key] = now
+    return st.session_state[_cache_key].copy()
+
+
+def invalidate_activities_cache(user):
+    """Invalidate the activities cache so the next get_activities_df call re-queries the DB.
+    Call this after any INSERT / UPDATE / DELETE on the activities table."""
+    st.session_state.pop(f"_act_df_ts_{user}", None)
 
 def get_user_subjects(user):
     """Return the user-specific subject list from user_subjects table.

@@ -16,7 +16,7 @@ def render(USER, USER_CONFIG):
     
     import plotly.graph_objects as go
     
-    df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    df = get_activities_df(USER)
     if not df.empty:
         if 'start_time' not in df.columns: df['start_time'] = None
         df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
@@ -110,6 +110,11 @@ def render(USER, USER_CONFIG):
     
             # TABLE FIRST
             report_df = daily_report(df_daily, sleep_data=sleep_hours_dict, powernap_data=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+            
+            # Last-30-days slice for all datewise trend graphs
+            _trend30_cutoff = (get_ist_now().date() - timedelta(days=29)).strftime('%Y-%m-%d')
+            df_trend30 = df_daily[df_daily['date'] >= _trend30_cutoff].copy()
+            
             if not report_df.empty:
                 st.markdown("**📋 Daily Performance Report Table**")
                 # Updated table prioritizing scores
@@ -131,12 +136,16 @@ def render(USER, USER_CONFIG):
     
     
             prod_total      = prod_df['duration'].sum()
-            essential_total = essential_df['duration'].sum()
+            essential_total = essential_df['duration'].sum() + (sum(sleep_hours_dict.values()) if 'sleep_hours_dict' in locals() else 0)
             waste_total     = waste_df['duration'].sum()
     
             # Line: Productive & Waste ONLY — Essential removed
             if not report_df.empty:
-                trend_df_15 = report_df.tail(15)
+                _today_str = get_ist_now().date()
+                _cutoff_15 = (_today_str - timedelta(days=14)).strftime('%Y-%m-%d')
+                _cutoff_30 = (_today_str - timedelta(days=29)).strftime('%Y-%m-%d')
+                
+                trend_df_15 = report_df[report_df['date'] >= _cutoff_15].copy()
                 fig_trend_15 = go.Figure()
                 fig_trend_15.add_trace(go.Scatter(x=trend_df_15['date'], y=trend_df_15['productive_hours'],
                     mode='lines+markers', name='Productive', line=dict(color='#22c55e', width=3)))
@@ -146,7 +155,7 @@ def render(USER, USER_CONFIG):
                                         xaxis_title="Date", yaxis_title="Hours")
                 st.plotly_chart(fig_trend_15, width='stretch', key="daily_trend_line_15")
                 
-                trend_df_30 = report_df.tail(30)
+                trend_df_30 = report_df[report_df['date'] >= _cutoff_30].copy()
                 fig_trend_30 = go.Figure()
                 fig_trend_30.add_trace(go.Scatter(x=trend_df_30['date'], y=trend_df_30['productive_hours'],
                     mode='lines+markers', name='Productive', line=dict(color='#22c55e', width=3)))
@@ -164,17 +173,30 @@ def render(USER, USER_CONFIG):
             try:
                 hl_df_all = read_sql("SELECT date, sleep_time, wakeup_time, powernap FROM health_logs WHERE username=%s ORDER BY date ASC", (USER,))
                 all_sleep_intervals_dict = {}
+                all_sleep_hours_dict = {}
+                all_powernap_dict = {}
                 if not hl_df_all.empty:
                     hl_map_all = {str(r['date']): r for _, r in hl_df_all.iterrows()}
                     for date_str in sorted(hl_map_all.keys()):
                         curr = hl_map_all[date_str]
                         prev_date = (pd.to_datetime(date_str) - timedelta(days=1)).strftime('%Y-%m-%d')
                         prev = hl_map_all.get(prev_date, {})
+                        
+                        sleep_a = calculate_sleep_hours(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        sleep_b = 99.0
+                        s_curr = curr.get('sleep_time', '')
+                        if s_curr and "AM" in str(s_curr).upper():
+                            sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
+                        all_sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
+                        all_powernap_dict[date_str] = curr.get('powernap', 0)
+                        
                         all_sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
             except:
                 all_sleep_intervals_dict = {}
+                all_sleep_hours_dict = {}
+                all_powernap_dict = {}
                 
-            all_time_report = daily_report(df, sleep_intervals_dict=all_sleep_intervals_dict)
+            all_time_report = daily_report(df, sleep_data=all_sleep_hours_dict, powernap_data=all_powernap_dict, sleep_intervals_dict=all_sleep_intervals_dict)
             
             if not all_time_report.empty:
                 tab_days, tab_weeks, tab_months, tab_years, tab_streaks = st.tabs([
@@ -234,9 +256,9 @@ def render(USER, USER_CONFIG):
             st.divider()
             st.markdown("### 📅 Day-wise Performance Trend")
             
-            wd_prod = weekday_analysis(df_daily, ALL_PRODUCTIVE, sleep_intervals_dict=sleep_intervals_dict)
-            _all_waste_types = [t for t in df_daily['type'].unique() if t not in ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL]
-            wd_waste = weekday_analysis(df_daily, _all_waste_types, sleep_intervals_dict=sleep_intervals_dict)
+            wd_prod = weekday_analysis(df_trend30, ALL_PRODUCTIVE, sleep_intervals_dict=sleep_intervals_dict)
+            _all_waste_types = [t for t in df_trend30['type'].unique() if t not in ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL]
+            wd_waste = weekday_analysis(df_trend30, _all_waste_types, sleep_intervals_dict=sleep_intervals_dict)
             
             if not wd_prod.empty or not wd_waste.empty:
                 # Prepare combined dataframe
@@ -246,7 +268,7 @@ def render(USER, USER_CONFIG):
                 wd_combined = pd.concat([df for df in [wd_prod, wd_waste] if not df.empty])
                 
                 fig_wd_combined = px.line(wd_combined, x='day_of_week', y='avg_hours', color='Category', markers=True,
-                                         title="Avg Productivity vs Waste by Weekday",
+                                         title="Avg Productivity vs Waste by Weekday — Last 30 Days",
                                          color_discrete_map={'Productive': '#22c55e', 'Waste': '#ef4444'})
                 st.plotly_chart(fig_wd_combined, width='stretch', key="weekday_combined")
             else:
@@ -258,11 +280,11 @@ def render(USER, USER_CONFIG):
             # Sub-activity Trends
             for act in ["Social Media", "TalkOnCall"]:
                 st.markdown(f"#### {act} Analysis")
-                trend_data = sub_activity_trend(df_daily, act, sleep_intervals_dict=sleep_intervals_dict)
+                trend_data = sub_activity_trend(df_trend30, act, sleep_intervals_dict=sleep_intervals_dict)
                 if not trend_data.empty:
-                    # Date-wise multi-line graph
+                    # Date-wise multi-line graph (last 30 days)
                     fig_sub_date = px.line(trend_data, x='date', y='duration', color='subject', markers=True,
-                                          title=f"{act} Usage Trend (Date-wise)")
+                                          title=f"{act} Usage Trend — Last 30 Days")
                     st.plotly_chart(fig_sub_date, width='stretch', key=f"trend_date_{act}")
                     
                     # Day-wise multi-line graph
@@ -288,9 +310,9 @@ def render(USER, USER_CONFIG):
             st.divider()
             st.markdown("### ⚖️ Social Media vs TalkOnCall Comparison")
             
-            # Combine both for comparison
-            sm_data = df_daily[df_daily['type'] == "Social Media"].groupby('date')['duration'].sum().reset_index()
-            tc_data = df_daily[df_daily['type'] == "TalkOnCall"].groupby('date')['duration'].sum().reset_index()
+            # Combine both for comparison (last 30 days)
+            sm_data = df_trend30[df_trend30['type'] == "Social Media"].groupby('date')['duration'].sum().reset_index()
+            tc_data = df_trend30[df_trend30['type'] == "TalkOnCall"].groupby('date')['duration'].sum().reset_index()
             
             if not sm_data.empty or not tc_data.empty:
                 sm_data['Category'] = 'Social Media'
@@ -298,7 +320,7 @@ def render(USER, USER_CONFIG):
                 comp_date = pd.concat([sm_data, tc_data])
                 
                 fig_comp_date = px.line(comp_date, x='date', y='duration', color='Category', markers=True,
-                                        title="Social Media vs TalkOnCall (Date-wise)")
+                                        title="Social Media vs TalkOnCall — Last 30 Days")
                 st.plotly_chart(fig_comp_date, width='stretch', key="comp_date_sm_tc")
                 
                 # Weekday comparison
@@ -531,12 +553,13 @@ def render(USER, USER_CONFIG):
                                     color_discrete_sequence=['#ef4444'], title="Waste by Activity Type")
                     st.plotly_chart(fig_wb, width='stretch', key="daily_waste_bar")
     
-                waste_trend = _filtered_waste_df.groupby('date')['duration'].sum().reset_index()
+                _filtered_waste_trend30 = _filtered_waste_df[_filtered_waste_df['date'] >= _trend30_cutoff]
+                waste_trend = _filtered_waste_trend30.groupby('date')['duration'].sum().reset_index()
                 fig_wl = go.Figure()
                 fig_wl.add_trace(go.Scatter(x=waste_trend['date'], y=waste_trend['duration'],
                     mode='lines+markers', name='Waste', line=dict(color='#ef4444', width=3),
                     fill='tozeroy', fillcolor='rgba(239,68,68,0.1)'))
-                fig_wl.update_layout(title="Daily Waste Trend", xaxis_title="Date", yaxis_title="Hours")
+                fig_wl.update_layout(title="Daily Waste Trend (Last 30 Days)", xaxis_title="Date", yaxis_title="Hours")
                 st.plotly_chart(fig_wl, width='stretch', key="daily_waste_line")
     
                 # ── Hourly Distribution ──
@@ -608,12 +631,13 @@ def render(USER, USER_CONFIG):
                                     color_discrete_sequence=['#3b82f6'], title="Essential by Activity Type")
                     st.plotly_chart(fig_eb, width='stretch', key="daily_essential_bar")
     
-                essential_trend = _filtered_essential_df.groupby('date')['duration'].sum().reset_index()
+                _filtered_essential_trend30 = _filtered_essential_df[_filtered_essential_df['date'] >= _trend30_cutoff]
+                essential_trend = _filtered_essential_trend30.groupby('date')['duration'].sum().reset_index()
                 fig_el = go.Figure()
                 fig_el.add_trace(go.Scatter(x=essential_trend['date'], y=essential_trend['duration'],
                     mode='lines+markers', name='Essential', line=dict(color='#3b82f6', width=3),
                     fill='tozeroy', fillcolor='rgba(59,130,246,0.1)'))
-                fig_el.update_layout(title="Daily Essential Trend", xaxis_title="Date", yaxis_title="Hours")
+                fig_el.update_layout(title="Daily Essential Trend (Last 30 Days)", xaxis_title="Date", yaxis_title="Hours")
                 st.plotly_chart(fig_el, width='stretch', key="daily_essential_line")
     
                 # ── Hourly Distribution ──
@@ -720,10 +744,15 @@ def render(USER, USER_CONFIG):
             st.markdown("### 🔝 Top 10 Productive & Waste Hours (Historical)")
             st.markdown("*Most productive and most wasted hours of the day based on your entire history*")
             
+            all_sleep_list = []
+            if 'all_sleep_intervals_dict' in locals():
+                for intervals in all_sleep_intervals_dict.values():
+                    all_sleep_list.extend(intervals)
+                    
             t5_col1, t5_col2 = st.columns(2)
             with t5_col1:
                 st.markdown("🎯 **Top 10 Productive Hours**")
-                t5_prod = get_top_hours_all_time(df_daily, type='productive')
+                t5_prod = get_top_hours_all_time(df, type='productive', sleep_intervals_list=all_sleep_list)
                 if t5_prod:
                     t5_prod_df = pd.DataFrame(t5_prod)
                     st.dataframe(t5_prod_df[['time', 'duration']], 
@@ -734,7 +763,7 @@ def render(USER, USER_CONFIG):
             
             with t5_col2:
                 st.markdown("⚠️ **Top 10 Waste Hours**")
-                t5_waste = get_top_hours_all_time(df_daily, type='waste')
+                t5_waste = get_top_hours_all_time(df, type='waste', sleep_intervals_list=all_sleep_list)
                 if t5_waste:
                     t5_waste_df = pd.DataFrame(t5_waste)
                     st.dataframe(t5_waste_df[['time', 'duration']], 
@@ -1001,7 +1030,7 @@ def render(USER, USER_CONFIG):
                         intervals = get_sleep_intervals(prev_h.get('sleep_time'), curr_h.get('wakeup_time'))
                         all_m_sleep_intervals.extend(intervals)
     
-                    cumul_24h = time_of_day_analysis_cumulative_24h(df, filter_month=month_str, all_sleep_intervals=all_m_sleep_intervals)
+                    cumul_24h = time_of_day_analysis_cumulative_24h(month_df, filter_month=month_str, all_sleep_intervals=all_m_sleep_intervals)
                 except Exception as e:
                     st.error(f"Error analyzing monthly pattern: {e}")
                     cumul_24h = pd.DataFrame()

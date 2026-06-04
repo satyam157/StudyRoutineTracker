@@ -43,7 +43,7 @@ def render(USER, USER_CONFIG):
     """, unsafe_allow_html=True)
     
     # Get all data for analysis
-    df_all = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    df_all = get_activities_df(USER)
     if not df_all.empty:
         if 'start_time' not in df_all.columns: df_all['start_time'] = None
         df_all['start_time'] = df_all.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)

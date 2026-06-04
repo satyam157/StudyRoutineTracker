@@ -9,6 +9,12 @@ from smart_tips import generate_smart_work_tips, render_smart_work_section
 import proposal
 
 def render(USER, USER_CONFIG):
+    if st.session_state.get("_clear_de_form"):
+        for k in list(st.session_state.keys()):
+            if k.startswith("de_"):
+                del st.session_state[k]
+        st.session_state["_clear_de_form"] = False
+
     conn = database.conn
     c = database.c
     st.title("📅 Smart Entry")
@@ -96,7 +102,7 @@ def render(USER, USER_CONFIG):
         </style>
     """, unsafe_allow_html=True)
     
-    selected_tab = st.radio("Tab Selection", ["📝 Log Activities", "🌙 Sleep & Wake Log", "⚙️ Manage Defaults"], 
+    selected_tab = st.radio("Tab Selection", ["📝 Log Activities", "✈️ Log Trip", "🌙 Sleep & Wake Log", "⚙️ Manage Defaults"], 
                             horizontal=True, label_visibility="collapsed", key="daily_tab_persist")
     
     if selected_tab == "📝 Log Activities":
@@ -121,45 +127,17 @@ def render(USER, USER_CONFIG):
             custom_type_map = {}
             custom_track_map = {}
     
-        # Check if we have a saved draft
-        draft_activity_type = None
-        draft_subject = None
-        draft_chapter = None
-        draft_desc = None
-        active_draft_id = None
-        draft_start_time = ""
-        draft_duration = 0.0
-        
-        try:
-            draft_df = read_sql("SELECT id, type, subject, chapter, description, start_time, duration FROM activities WHERE username=%s AND status='Draft' LIMIT 1", (USER,))
-            if not draft_df.empty:
-                d_row = draft_df.iloc[0]
-                active_draft_id = d_row['id']
-                draft_activity_type = d_row['type']
-                draft_subject = d_row['subject']
-                draft_chapter = d_row['chapter']
-                draft_desc = d_row['description']
-                draft_start_time = d_row.get('start_time', "") or ""
-                draft_duration = d_row.get('duration', 0.0) or 0.0
-                
-                # Check if we need to force load this draft into the UI
-                if st.session_state.get("last_loaded_draft_id") != active_draft_id:
-                    for k in list(st.session_state.keys()):
-                        if k.startswith("de_"):
-                            del st.session_state[k]
-                    st.session_state["last_loaded_draft_id"] = active_draft_id
-                    st.rerun()
-                
-                # Temporarily override user defaults for this activity
-                if draft_activity_type:
-                    _user_defaults[draft_activity_type] = (draft_subject or "", draft_chapter or "")
-        except:
-            if "last_loaded_draft_id" in st.session_state:
-                del st.session_state["last_loaded_draft_id"]
-
-        # Check if we are editing an existing entry (redirected from the list below)
         _editing_entry = st.session_state.get("editing_entry", None)
         _editing_entry_id = None
+        _edit_type = ""
+        _edit_sub = ""
+        _edit_ch = ""
+        _edit_desc = ""
+        _edit_dur = 0.0
+        _edit_amt = 0.0
+        _edit_st = ""
+        _editing_activity_type = None
+
         if _editing_entry:
             _editing_entry_id = _editing_entry.get("id")
             _edit_type = _editing_entry.get("type", "")
@@ -169,13 +147,31 @@ def render(USER, USER_CONFIG):
             _edit_dur = _editing_entry.get("duration", 0.0)
             _edit_amt = _editing_entry.get("amount", 0.0)
             _edit_st = _editing_entry.get("start_time", "")
-            # Override defaults so the main form pre-fills correctly
             if _edit_type:
-                draft_activity_type = _edit_type
-                draft_subject = _edit_sub
-                draft_chapter = _edit_ch
-                draft_desc = _edit_desc
+                _editing_activity_type = _edit_type
                 _user_defaults[_edit_type] = (_edit_sub or "", _edit_ch or "")
+
+        # Seed de_* session state keys from edit values (once per edit session)
+        if _editing_entry and not st.session_state.get("de_seeded"):
+            # Study mode
+            if "de_study_mode" not in st.session_state:
+                st.session_state["de_study_mode"] = "Current Affairs" if _edit_sub == "Current Affairs" else "Static GS Syllabus"
+            # Time range fields — seed from_time if start_time is known
+            if _edit_st:
+                _from_key = f"de_from_{_edit_type}"
+                if _from_key not in st.session_state:
+                    st.session_state[_from_key] = _edit_st
+                # Compute to_time from start + duration
+                if _edit_dur and float(_edit_dur) > 0:
+                    try:
+                        _fh, _fm = map(int, str(_edit_st).split(":"))
+                        _total_mins = int(_fh * 60 + _fm + float(_edit_dur) * 60)
+                        _to_key = f"de_to_{_edit_type}"
+                        if _to_key not in st.session_state:
+                            st.session_state[_to_key] = f"{(_total_mins // 60) % 24}:{_total_mins % 60:02d}"
+                    except:
+                        pass
+            st.session_state["de_seeded"] = True
 
         # Show editing banner if editing
         if _editing_entry_id:
@@ -190,21 +186,28 @@ def render(USER, USER_CONFIG):
                     for k in list(st.session_state.keys()):
                         if k.startswith("de_"):
                             del st.session_state[k]
+                    if "de_seeded" in st.session_state: del st.session_state["de_seeded"]
                     st.rerun()
 
         # Activity selection with inline delete
         _act_col, _del_col = st.columns([3, 1])
         with _act_col:
             _all_acts = base_activities + custom + ["+ Add New"]
-            _def_act_idx = _all_acts.index(draft_activity_type) if draft_activity_type in _all_acts else 0
+            _def_act_idx = _all_acts.index(_editing_activity_type) if _editing_activity_type in _all_acts else 0
             activity = st.selectbox("Activity", _all_acts, index=_def_act_idx)
             
             if st.session_state.get("last_selected_activity") != activity:
-                for k in list(st.session_state.keys()):
-                    if k.startswith("de_"):
-                        del st.session_state[k]
+                # Don't wipe edit state when editing mode just loaded with the correct activity
+                _is_same_as_edit = bool(_editing_entry and activity == _edit_type)
+                if not _is_same_as_edit:
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("de_"):
+                            del st.session_state[k]
+                    if "de_seeded" in st.session_state:
+                        del st.session_state["de_seeded"]
+                    st.session_state["last_selected_activity"] = activity
+                    st.rerun()
                 st.session_state["last_selected_activity"] = activity
-                st.rerun()
         
         with _del_col:
             if activity in custom:
@@ -364,6 +367,11 @@ def render(USER, USER_CONFIG):
                                 import time; time.sleep(1)
                                 st.rerun()
     
+        # Helper for default placeholders
+        _is_editing_act = bool(_editing_entry_id and _editing_entry.get('type') == activity)
+        def _val_ph(def_val, base_ph=""): return (def_val, base_ph) if _is_editing_act else ("", def_val or base_ph)
+        def _final_val(typed, default): return typed if (typed or _is_editing_act) else default
+        
         # Activity specific fields
         if activity == "Study":
             if "de_study_mode" in st.session_state and st.session_state["de_study_mode"] == "Current Affairs":
@@ -371,20 +379,31 @@ def render(USER, USER_CONFIG):
             else:
                 _def_sub1, _def_sub2 = _user_defaults.get("Study", ("", ""))
                 _def_ch = _def_sub2 if _def_sub1 != "Current Affairs" else ""
-                sub2 = st.text_input("Chapter / Topic", value=_def_ch, max_chars=50, placeholder="Enter chapter/topic...", key="de_study_static_ch")
+                _v, _p = _val_ph(_def_ch, "Enter chapter/topic...")
+                _t2 = st.text_input("Chapter / Topic", value=_v, max_chars=50, placeholder=_p, key="de_study_static_ch")
+                sub2 = _final_val(_t2, _def_ch)
         elif activity == "Revision":
             _def_sub1, _def_sub2 = _user_defaults.get("Revision", ("", ""))
             _rev_idx = 1 if _def_sub1 == "Pages" else 0
             _rev_type = st.radio("Revision Type", ["Chapter", "Pages"], index=_rev_idx, horizontal=True, key="de_rev_type")
             if _rev_type == "Chapter":
-                sub2 = st.text_input("Chapter Revised", value=_def_sub2, key="de_rev_ch")
+                _v, _p = _val_ph(_def_sub2, "Chapter Name")
+                _t2 = st.text_input("Chapter Revised", value=_v, placeholder=_p, key="de_rev_ch")
+                sub2 = _final_val(_t2, _def_sub2)
             else:
-                _pg_val = st.text_input("Pages Revised", value=_def_sub2.replace(" pg", "") if _def_sub2 else "", key="de_rev_pg")
-                sub2 = f"{_pg_val} pg" if _pg_val.strip() else ""
+                _def_pg = _def_sub2.replace(" pg", "") if _def_sub2 else ""
+                _v, _p = _val_ph(_def_pg, "Pages")
+                _pg_val = st.text_input("Pages Revised", value=_v, placeholder=_p, key="de_rev_pg")
+                _final_pg = _final_val(_pg_val, _def_pg)
+                sub2 = f"{_final_pg} pg" if str(_final_pg).strip() else ""
         elif activity == "Book Reading":
             _def_sub1, _def_sub2 = _user_defaults.get("Book Reading", ("", ""))
-            sub1 = st.text_input("Book Title", value=_def_sub1, key="de_book_title")
-            sub2 = st.text_input("Chapters/Pages", value=_def_sub2, key="de_book_detail")
+            _v1, _p1 = _val_ph(_def_sub1, "Book Title")
+            _t1 = st.text_input("Book Title", value=_v1, placeholder=_p1, key="de_book_title")
+            sub1 = _final_val(_t1, _def_sub1)
+            _v2, _p2 = _val_ph(_def_sub2, "Chapters/Pages")
+            _t2 = st.text_input("Chapters/Pages", value=_v2, placeholder=_p2, key="de_book_detail")
+            sub2 = _final_val(_t2, _def_sub2)
         elif activity in ["Answer Writing", "Practice"]:
             _def_sub1, _def_sub2 = _user_defaults.get(activity, ("", ""))
             _def_q = 0
@@ -404,17 +423,27 @@ def render(USER, USER_CONFIG):
             if sub1 == "D-Day Exam":
                 sub2 = ""
             else:
-                sub2 = st.text_input("#Questions", value=_def_sub2)
+                _v, _p = _val_ph(_def_sub2, "#Questions")
+                _t2 = st.text_input("#Questions", value=_v, placeholder=_p)
+                sub2 = _final_val(_t2, _def_sub2)
         elif activity == "Office":
             _def_sub1, _def_sub2 = _user_defaults.get("Office", ("", ""))
-            sub1 = st.text_input("Work Notes", value=_def_sub1, key="de_office_notes")
+            _v1, _p1 = _val_ph(_def_sub1, "Work Notes")
+            _t1 = st.text_input("Work Notes", value=_v1, placeholder=_p1, key="de_office_notes")
+            sub1 = _final_val(_t1, _def_sub1)
         elif activity == "Coaching":
             _def_sub1, _def_sub2 = _user_defaults.get("Coaching", ("", ""))
-            sub1 = st.text_input("Subject", value=_def_sub1, key="de_coaching_topic")
-            sub2 = st.text_input("Notes", value=_def_sub2, key="de_coaching_notes")
+            _v1, _p1 = _val_ph(_def_sub1, "Subject")
+            _t1 = st.text_input("Subject", value=_v1, placeholder=_p1, key="de_coaching_topic")
+            sub1 = _final_val(_t1, _def_sub1)
+            _v2, _p2 = _val_ph(_def_sub2, "Notes")
+            _t2 = st.text_input("Notes", value=_v2, placeholder=_p2, key="de_coaching_notes")
+            sub2 = _final_val(_t2, _def_sub2)
         elif activity == "WFH":
             _def_sub1, _def_sub2 = _user_defaults.get("WFH", ("", ""))
-            sub1 = st.text_input("Work Notes", value=_def_sub1, key="de_wfh_notes")
+            _v1, _p1 = _val_ph(_def_sub1, "Work Notes")
+            _t1 = st.text_input("Work Notes", value=_v1, placeholder=_p1, key="de_wfh_notes")
+            sub1 = _final_val(_t1, _def_sub1)
         elif activity == "Entertainment":
             _def_sub1, _def_sub2 = _user_defaults.get("Entertainment", ("", ""))
             _def_ent_idx = 0
@@ -442,7 +471,9 @@ def render(USER, USER_CONFIG):
             if _def_sub1 in talkoncall_withwhom:
                 _def_whom_idx = talkoncall_withwhom.index(_def_sub1)
             sub1 = st.selectbox("With Whom", talkoncall_withwhom, index=_def_whom_idx)
-            sub2 = st.text_input("Topic / Notes", value=_def_sub2, key="de_talk_notes")
+            _v2, _p2 = _val_ph(_def_sub2, "Topic / Notes")
+            _t2 = st.text_input("Topic / Notes", value=_v2, placeholder=_p2, key="de_talk_notes")
+            sub2 = _final_val(_t2, _def_sub2)
         elif activity == "Food":
             _def_sub1, _def_sub2 = _user_defaults.get("Food", ("", ""))
             _def_food_idx = 0
@@ -457,19 +488,67 @@ def render(USER, USER_CONFIG):
             sub1 = st.selectbox("Service", transport_services, index=_def_trans_idx)
         elif activity == "WentOutside":
             _def_sub1, _def_sub2 = _user_defaults.get("WentOutside", ("", ""))
-            sub1 = st.text_input("Location", value=_def_sub1, key="de_went_outside")
+            _v1, _p1 = _val_ph(_def_sub1, "Location")
+            _t1 = st.text_input("Location", value=_v1, placeholder=_p1, key="de_went_outside")
+            sub1 = _final_val(_t1, _def_sub1)
         elif activity == "Turf":
             _def_sub1, _def_sub2 = _user_defaults.get("Turf", ("", ""))
-            sub1 = st.text_input("Sport", value=_def_sub1, key="de_turf_sport")
-            sub2 = st.text_input("Details", value=_def_sub2, key="de_turf_detail")
+            _v1, _p1 = _val_ph(_def_sub1, "Sport")
+            _t1 = st.text_input("Sport", value=_v1, placeholder=_p1, key="de_turf_sport")
+            sub1 = _final_val(_t1, _def_sub1)
+            _v2, _p2 = _val_ph(_def_sub2, "Details")
+            _t2 = st.text_input("Details", value=_v2, placeholder=_p2, key="de_turf_detail")
+            sub2 = _final_val(_t2, _def_sub2)
         elif activity == "Travelling":
             _def_sub1, _def_sub2 = _user_defaults.get("Travelling", ("", ""))
             _travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
             _def_travel_idx = 2
             if _def_sub1 in _travel_modes:
                 _def_travel_idx = _travel_modes.index(_def_sub1)
-            sub1 = st.selectbox("Mode", _travel_modes, index=_def_travel_idx, key="de_travel_mode")
-            sub2 = st.text_input("Destination", value=_def_sub2, key="de_travel_dest")
+            
+            _t_trip, _t_study = st.tabs(["🚗 Trip Details", "📚 Study During Trip"])
+            with _t_trip:
+                sub1 = st.selectbox("Mode", _travel_modes, index=_def_travel_idx, key="de_travel_mode")
+                
+                _base_dest = _def_sub2
+                _parsed_study = {}
+                if _is_editing_act and " | Studied: " in _def_sub2:
+                    parts = _def_sub2.split(" | Studied: ")
+                    _base_dest = parts[0]
+                    study_part = parts[1]
+                    # Parse format like "History (Ch 1), Polity (Ch 2)"
+                    import re
+                    matches = re.findall(r'([^,]+?)\s*\(([^)]+)\)', study_part)
+                    for m in matches:
+                        subj_name = m[0].strip()
+                        if subj_name.startswith('and '):
+                            subj_name = subj_name[4:].strip()
+                        _parsed_study[subj_name] = m[1].strip()
+                
+                _v2, _p2 = _val_ph(_base_dest, "Destination")
+                _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
+                _dest = _final_val(_t2, _base_dest)
+            
+            with _t_study:
+                st.caption("Track chapters completed during this trip:")
+                _all_subjs = get_user_subjects(USER)
+                _default_subjs = [s for s in _parsed_study.keys() if s in _all_subjs]
+                
+                _selected_subjs = st.multiselect("Subjects Studied", _all_subjs, default=_default_subjs if _is_editing_act else None, key="de_travel_study_subjs")
+                
+                _study_entries = []
+                for subj in _selected_subjs:
+                    _base_ch = _parsed_study.get(subj, "")
+                    _v_study, _p_study = _val_ph(_base_ch, "e.g. Chapter 1")
+                    _study_ch_input = st.text_input(f"Chapters for {subj}", value=_v_study, placeholder=_p_study, key=f"de_travel_study_ch_{subj}")
+                    _study_ch = _final_val(_study_ch_input, _base_ch)
+                    if _study_ch.strip():
+                        _study_entries.append(f"{subj} ({_study_ch.strip()})")
+            
+            if _study_entries:
+                sub2 = f"{_dest} | Studied: " + ", ".join(_study_entries)
+            else:
+                sub2 = _dest
     
         _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test"]
         _track_by_expense = activity in ["Food", "Transport"]
@@ -480,14 +559,16 @@ def render(USER, USER_CONFIG):
         _desc_default = ""
         if _editing_entry_id and _editing_entry.get('type') == activity and _edit_desc:
             _desc_default = _edit_desc
-        elif active_draft_id and draft_activity_type == activity and draft_desc:
-            _desc_default = draft_desc
         description = st.text_input("📝 Description (Optional)", value=_desc_default, key=f"de_desc_{activity}")
         
         if not _editing_entry_id:
             pass
     
-        _def_dur_mode_idx = 1
+        # Pre-select mode based on edit entry: use "Hours" if no start_time, else "Time Range"
+        if _editing_entry_id and _editing_entry.get('type') == activity:
+            _def_dur_mode_idx = 1 if _edit_st else 0
+        else:
+            _def_dur_mode_idx = 1
                 
         _duration_mode = st.radio("⏱️ Duration Input", ["Hours", "Time Range (From-To)"], index=_def_dur_mode_idx, horizontal=True, key=f"de_dur_mode_{activity}")
         
@@ -539,10 +620,10 @@ def render(USER, USER_CONFIG):
             else:
                 duration = st.number_input("⏱️ Hours", min_value=0.0, step=0.5, value=_def_dur)
         else:
-            _def_st = _edit_st if (_editing_entry_id and _editing_entry.get('type') == activity) else (draft_start_time if (active_draft_id and draft_activity_type == activity) else "")
+            _def_st = _edit_st if (_editing_entry_id and _editing_entry.get('type') == activity) else ""
             _def_to = ""
             if _def_st:
-                _dur_to_use = _edit_dur if (_editing_entry_id and _editing_entry.get('type') == activity) else (draft_duration if (active_draft_id and draft_activity_type == activity) else 0.0)
+                _dur_to_use = _edit_dur if (_editing_entry_id and _editing_entry.get('type') == activity) else 0.0
                 if _dur_to_use > 0:
                     try:
                         f_h, f_m = map(int, _def_st.split(":"))
@@ -559,7 +640,6 @@ def render(USER, USER_CONFIG):
             _now_str = f"{_ist_now.hour}:{_ist_now.minute:02d}"
             
             # Explicitly seed session_state ONLY if key doesn't exist yet
-            # This prevents value= from resetting what user typed on each rerun
             _from_key = f"de_from_{activity}"
             _to_key = f"de_to_{activity}"
             if _from_key not in st.session_state:
@@ -567,21 +647,14 @@ def render(USER, USER_CONFIG):
             if _to_key not in st.session_state:
                 st.session_state[_to_key] = _def_to
             
-            c1, c2 = st.columns(2)
+            c1, c2 = st.columns([1, 1])
             with c1:
-                from_time_raw = st.text_input("From Time", key=_from_key, placeholder="e.g. 2:30 PM")
+                from_time_raw = st.text_input("From Time", key=_from_key, placeholder="e.g. 10:30")
             with c2:
-                to_time_raw = st.text_input("To Time", key=_to_key, placeholder=f"Leave blank = now ({_now_str})")
+                to_time_raw = st.text_input("To Time", key=_to_key, placeholder="e.g. 12:00")
             
-            # If From Time filled but To Time empty, show hint that current time will be used
-            if from_time_raw and not to_time_raw:
-                st.info(f"ℹ️ 'To Time' is empty — submitting will use current time **{_now_str}** as end time.")
-            
-            # Use current time as To Time if not provided (only when From Time is set)
-            _to_time_effective = to_time_raw if to_time_raw else (_now_str if from_time_raw else "")
-            
-            if from_time_raw and _to_time_effective:
-                f_p, t_p = parse_time_value(from_time_raw), parse_time_value(_to_time_effective)
+            if from_time_raw and to_time_raw:
+                f_p, t_p = parse_time_value(from_time_raw), parse_time_value(to_time_raw)
                 if f_p and t_p:
                     from_h, from_m = f_p
                     to_h, to_m = t_p
@@ -594,30 +667,14 @@ def render(USER, USER_CONFIG):
                         duration = duration_today + duration_tomorrow
                     else:
                         duration = (t_mins - f_mins) / 60
-                    st.caption(f"Duration: **{format_duration(duration)}**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
+                    st.caption(f"⏱️ Duration: **{format_duration(duration)}**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
+                elif from_time_raw and not parse_time_value(to_time_raw):
+                    st.warning("⚠️ Invalid To Time format. Use HH:MM or H:MM AM/PM")
+            elif from_time_raw and not to_time_raw:
+                st.caption("ℹ️ Enter To Time")
             if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=_def_amt if _duration_mode != "Hours" else 0.0, key=f"de_amt_tr_{activity}")
         
-        
-        save_draft_clicked = False
-        if not _editing_entry_id:
-            save_draft_clicked = st.button("📝 Save to Draft", key=f"btn_save_draft_main_{activity}", use_container_width=True)
-            
-        if save_draft_clicked:
-            st_val = start_time
-            dur = duration
-            if _duration_mode == "Time Range (From-To)":
-                if from_time_raw:
-                    f_p = parse_time_value(from_time_raw)
-                    if f_p:
-                        from_h, from_m = f_p
-                        st_val = f"{from_h}:{from_m:02d}"
-            
-            c.execute("DELETE FROM activities WHERE username=%s AND status='Draft'", (USER,))
-            c.execute("INSERT INTO activities (username, date, type, subject, chapter, start_time, duration, amount, description, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (USER, str(date), activity, sub1, sub2, st_val, dur, amount, description, 'Draft'))
-            conn.commit()
-            
-            st.toast("✅ Draft saved successfully!", icon="✅")
-            import time; time.sleep(1); st.rerun()
+
 
         _submit_label = "💾 Update Activity" if _editing_entry_id else "💾 Submit Activity"
         save_clicked = st.button(_submit_label, key="submit_main_activity", use_container_width=True)
@@ -675,12 +732,16 @@ def render(USER, USER_CONFIG):
             
             _msg = "✅ Activity updated!" if _editing_entry_id else "✅ Activity saved!"
             st.toast(_msg, icon="✅")
+            invalidate_activities_cache(USER)
+            # Request clearing of input fields safely to force frontend update
+            st.session_state["_clear_de_form"] = True
+                    
             import time; time.sleep(1); st.rerun()
 
     
         st.divider()
         st.markdown("### 📋 Activities Logged")
-        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time, description, COALESCE(status, 'Completed') as status FROM activities WHERE date=%s AND username=%s AND COALESCE(status, 'Completed') != 'Draft' ORDER BY id", (str(date), USER))
+        _today_df = read_sql("SELECT id, type, subject, chapter, duration, amount, start_time, description, COALESCE(status, 'Completed') as status FROM activities WHERE date=%s AND username=%s AND COALESCE(status, 'Completed') != 'Draft' ORDER BY CASE WHEN start_time IS NULL OR start_time = '' THEN 1 ELSE 0 END, LPAD(start_time, 5, '0') ASC, id ASC", (str(date), USER))
         if _today_df.empty: st.caption("No activities logged for this date.")
         else:
             for _, _row in _today_df.iterrows():
@@ -746,6 +807,7 @@ def render(USER, USER_CONFIG):
                         if st.button("✅ Yes", key=f"yes_daily_del_{rid}", use_container_width=True):
                             database.c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (rid, USER))
                             database.conn.commit()
+                            invalidate_activities_cache(USER)
                             st.session_state[f"confirm_daily_del_{rid}"] = False
                             st.rerun()
                     with nc:
@@ -795,6 +857,8 @@ def render(USER, USER_CONFIG):
                     """, (USER, str(date), wu_f))
                     conn.commit()
                     st.toast(f"✅ Wakeup saved!", icon="✅")
+                    if "wu_raw" in st.session_state:
+                        del st.session_state["wu_raw"]
                     import time; time.sleep(1); st.rerun()
                 else: st.warning("Enter wakeup time.")
     
@@ -814,9 +878,208 @@ def render(USER, USER_CONFIG):
                     """, (USER, str(date), sl_f))
                     conn.commit()
                     st.toast(f"✅ Sleep saved!", icon="✅")
+                    if "sl_raw" in st.session_state:
+                        del st.session_state["sl_raw"]
                     import time; time.sleep(1); st.rerun()
                 else: st.warning("Enter sleep time.")
     
+    elif selected_tab == "✈️ Log Trip":
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #f59e0b; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
+            <div style="font-size:17px; font-weight:700; color:#fbbf24; margin-bottom:4px;">✈️ Past Trips</div>
+            <div style="font-size:13px; color:#94a3b8;">All your past trips aggregated by destination. Each card shows trip details including dates, cost, transport, and study info.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Fetch all Travelling activities for this user
+        _trip_df = read_sql(
+            "SELECT date, subject, chapter, duration, amount, description FROM activities WHERE username=%s AND type='Travelling' ORDER BY date ASC",
+            (USER,)
+        )
+
+        if _trip_df.empty:
+            st.info("No trips logged yet. Log a 'Travelling' activity to see your trip history here! 🗺️")
+        else:
+            import re as _re
+            from datetime import datetime as _dt
+
+            # Extract base destination (before " | Studied: " if present)
+            def _extract_dest(ch):
+                if not ch or str(ch).strip().lower() in ('none', 'nan', 'null'):
+                    return ''
+                s = str(ch)
+                if ' | Studied: ' in s:
+                    return s.split(' | Studied: ')[0].strip()
+                return s.strip()
+
+            def _extract_study_info(ch):
+                if not ch or ' | Studied: ' not in str(ch):
+                    return ''
+                return str(ch).split(' | Studied: ')[1].strip()
+
+            _trip_df['dest'] = _trip_df['chapter'].apply(_extract_dest)
+            _trip_df['study_info'] = _trip_df['chapter'].apply(_extract_study_info)
+            _trip_df['date_parsed'] = pd.to_datetime(_trip_df['date'])
+
+            # Group consecutive dates with the same destination into trips
+            # Algorithm: sort by date, walk through rows; if same dest and date is within 1 day
+            # of previous, extend current trip; otherwise start a new trip.
+            _trip_df = _trip_df.sort_values('date_parsed').reset_index(drop=True)
+
+            trips = []
+            current_trip = None
+
+            for _, row in _trip_df.iterrows():
+                dest = row['dest']
+                d = row['date_parsed']
+                transport = row['subject'] or ''
+                dur = float(row['duration'] or 0)
+                amt = float(row['amount'] or 0)
+                study = row['study_info']
+                desc = row['description'] if row['description'] and str(row['description']).strip().lower() not in ('none', 'nan', 'null') else ''
+
+                if current_trip and current_trip['dest'] == dest and (d - current_trip['end_date']).days <= 1:
+                    # Extend current trip
+                    current_trip['end_date'] = d
+                    current_trip['total_hours'] += dur
+                    current_trip['total_cost'] += amt
+                    current_trip['dates'].append(str(row['date']))
+                    if transport and transport not in current_trip['transports']:
+                        current_trip['transports'].append(transport)
+                    if study:
+                        current_trip['study_entries'].append(study)
+                    if desc and desc not in current_trip['descriptions']:
+                        current_trip['descriptions'].append(desc)
+                else:
+                    # Save previous trip
+                    if current_trip:
+                        trips.append(current_trip)
+                    # Start new trip
+                    current_trip = {
+                        'dest': dest,
+                        'start_date': d,
+                        'end_date': d,
+                        'total_hours': dur,
+                        'total_cost': amt,
+                        'transports': [transport] if transport else [],
+                        'dates': [str(row['date'])],
+                        'study_entries': [study] if study else [],
+                        'descriptions': [desc] if desc else [],
+                    }
+
+            # Don't forget the last trip
+            if current_trip:
+                trips.append(current_trip)
+
+            # Sort trips by start date descending (most recent first)
+            trips.sort(key=lambda t: t['start_date'], reverse=True)
+
+            st.markdown(f"""<div style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+                <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
+                    <span style="color:#94a3b8; font-size:12px;">Total Trips</span><br>
+                    <span style="color:#fbbf24; font-size:22px; font-weight:700;">{len(trips)}</span>
+                </div>
+                <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
+                    <span style="color:#94a3b8; font-size:12px;">Total Days Travelled</span><br>
+                    <span style="color:#38bdf8; font-size:22px; font-weight:700;">{sum(len(t['dates']) for t in trips)}</span>
+                </div>
+                <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
+                    <span style="color:#94a3b8; font-size:12px;">Total Spent</span><br>
+                    <span style="color:#22c55e; font-size:22px; font-weight:700;">₹{sum(t['total_cost'] for t in trips):,.0f}</span>
+                </div>
+            </div>""", unsafe_allow_html=True)
+
+            for idx, trip in enumerate(trips):
+                _start = trip['start_date']
+                _end = trip['end_date']
+                _num_days = len(trip['dates'])
+                _dest = trip['dest'] or 'Unknown'
+
+                # Duration in months and days
+                _months = _num_days // 30
+                _remaining_days = _num_days % 30
+                if _months > 0 and _remaining_days > 0:
+                    _dur_str = f"{_months} month{'s' if _months > 1 else ''} {_remaining_days} day{'s' if _remaining_days != 1 else ''}"
+                elif _months > 0:
+                    _dur_str = f"{_months} month{'s' if _months > 1 else ''}"
+                else:
+                    _dur_str = f"{_num_days} day{'s' if _num_days != 1 else ''}"
+
+                _start_str = _start.strftime('%d %b %Y')
+                _end_str = _end.strftime('%d %b %Y')
+                _date_range = f"{_start_str} → {_end_str}" if _start_str != _end_str else _start_str
+
+                _transport_str = ', '.join(trip['transports']) if trip['transports'] else '—'
+                _cost_str = f"₹{trip['total_cost']:,.0f}" if trip['total_cost'] > 0 else '—'
+                _hours_str = format_duration(trip['total_hours']) if trip['total_hours'] > 0 else '—'
+
+                # Study info
+                _study_str = ''
+                if trip['study_entries']:
+                    _unique_study = []
+                    for s in trip['study_entries']:
+                        if s not in _unique_study:
+                            _unique_study.append(s)
+                    _study_str = '; '.join(_unique_study)
+
+                # Description
+                _desc_str = ' | '.join(trip['descriptions']) if trip['descriptions'] else ''
+
+                # Build the trip card HTML
+                _study_html = ''
+                if _study_str:
+                    _study_html = f"""<div style="margin-top:8px; padding:8px 12px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:8px;">
+                        <span style="color:#a78bfa; font-size:11px; font-weight:700;">📚 STUDY DURING TRIP</span><br>
+                        <span style="color:#e2e8f0; font-size:13px;">{_study_str}</span>
+                    </div>"""
+
+                _desc_html = ''
+                if _desc_str:
+                    _desc_html = f"""<div style="margin-top:6px; font-size:12px; color:#94a3b8; font-style:italic;">💬 {_desc_str}</div>"""
+
+                st.markdown(f"""
+                <div style="
+                    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                    border: 1.5px solid #334155;
+                    border-left: 4px solid #fbbf24;
+                    border-radius: 14px;
+                    padding: 18px 22px;
+                    margin-bottom: 14px;
+                    transition: all 0.25s ease;
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                        <div>
+                            <div style="font-size:20px; font-weight:800; color:#fbbf24; margin-bottom:4px;">📍 {_dest}</div>
+                            <div style="font-size:13px; color:#94a3b8;">{_date_range}</div>
+                        </div>
+                        <div style="background:rgba(251,191,36,0.15); padding:6px 14px; border-radius:20px; border:1px solid rgba(251,191,36,0.3);">
+                            <span style="color:#fbbf24; font-size:14px; font-weight:700;">{_dur_str}</span>
+                        </div>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:14px;">
+                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">🚗 TRANSPORT</div>
+                            <div style="color:#e2e8f0; font-size:14px; font-weight:700; margin-top:2px;">{_transport_str}</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">💰 COST</div>
+                            <div style="color:#22c55e; font-size:14px; font-weight:700; margin-top:2px;">{_cost_str}</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">⏱️ TRAVEL HRS</div>
+                            <div style="color:#38bdf8; font-size:14px; font-weight:700; margin-top:2px;">{_hours_str}</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">📅 DAYS</div>
+                            <div style="color:#fbbf24; font-size:14px; font-weight:700; margin-top:2px;">{_num_days}</div>
+                        </div>
+                    </div>
+                    {_study_html}
+                    {_desc_html}
+                </div>
+                """, unsafe_allow_html=True)
+
     elif selected_tab == "⚙️ Manage Defaults":
         st.markdown("""
         <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #2563eb; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
@@ -976,19 +1239,25 @@ def render(USER, USER_CONFIG):
             except Exception as ex:
                 st.error(f"Error saving defaults: {ex}")
     
-    # ── SMART WORK TIPS (Daily Entry Page) ──
-    _de_df_all = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
-    if not _de_df_all.empty:
-        _de_prod = _de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
-        _de_waste = _de_df_all[~_de_df_all['type'].isin(PRODUCTIVE_TYPES + ESSENTIAL_TYPES + NEUTRAL_TYPES)]['duration'].sum()
-        _de_ess = _de_df_all[_de_df_all['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
-        _de_tips = generate_smart_work_tips(
-            prod_hours=_de_prod, waste_hours=_de_waste, essential_hours=_de_ess,
-            study_streak=streak(_de_df_all), focus_pct=focus_score(_de_df_all),
-            subject_count=len(_de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['subject'].unique()) if not _de_df_all.empty else 0,
-            productivity_pct=0, context="general"
-        )
-        with st.expander("⚡ Smart Work Tips & UPSC Strategies", expanded=False):
-            st.markdown(render_smart_work_section(_de_tips, max_tips=12), unsafe_allow_html=True)
-    
+    # ── SMART WORK TIPS (Daily Entry Page) ── Lazy-loaded only when expander is opened
+    with st.expander("⚡ Smart Work Tips & UPSC Strategies", expanded=False):
+        if st.button("🔄 Load Tips", key="de_load_tips") or st.session_state.get("de_tips_loaded"):
+            st.session_state["de_tips_loaded"] = True
+            _de_df_all = read_sql("SELECT type, subject, duration FROM activities WHERE username=%s", (USER,))
+            if not _de_df_all.empty:
+                _de_prod = _de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['duration'].sum()
+                _de_waste = _de_df_all[~_de_df_all['type'].isin(PRODUCTIVE_TYPES + ESSENTIAL_TYPES + NEUTRAL_TYPES)]['duration'].sum()
+                _de_ess = _de_df_all[_de_df_all['type'].isin(ESSENTIAL_TYPES)]['duration'].sum()
+                _de_tips = generate_smart_work_tips(
+                    prod_hours=_de_prod, waste_hours=_de_waste, essential_hours=_de_ess,
+                    study_streak=streak(_de_df_all), focus_pct=focus_score(_de_df_all),
+                    subject_count=len(_de_df_all[_de_df_all['type'].isin(PRODUCTIVE_TYPES)]['subject'].unique()),
+                    productivity_pct=0, context="general"
+                )
+                st.markdown(render_smart_work_section(_de_tips, max_tips=12), unsafe_allow_html=True)
+            else:
+                st.info("No activity data yet. Log some activities to get personalized tips!")
+        else:
+            st.caption("Click **Load Tips** above to generate personalized UPSC study tips based on your activity data.")
+
     # ---------------- CALENDAR ----------------

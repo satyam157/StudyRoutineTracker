@@ -19,11 +19,8 @@ def render(USER, USER_CONFIG):
     import re as _re
     
     tgt_df = read_sql("SELECT * FROM targets WHERE username=%s", (USER,))
-    act_df = read_sql(
-        "SELECT * FROM activities WHERE username=%s "
-        "AND type IN ('Study','Revision','Test','Answer Writing','Practice','Book Reading')",
-        (USER,)
-    )
+    _all_act_df = get_activities_df(USER)
+    act_df = _all_act_df[_all_act_df['type'].isin(['Study','Revision','Test','Answer Writing','Practice','Book Reading'])].copy() if not _all_act_df.empty else pd.DataFrame()
     if not act_df.empty:
         if 'start_time' not in act_df.columns: act_df['start_time'] = None
         act_df['start_time'] = act_df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)

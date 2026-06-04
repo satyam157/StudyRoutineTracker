@@ -117,7 +117,7 @@ def get_fresh_cursor():
         return None, None
 
 try_count = 5
-delay = 3
+delay = 1
 
 for attempt in range(try_count):
     try:
@@ -436,6 +436,10 @@ if c is not None:
             PRIMARY KEY (username, activity)
         )
         """)
+        try:
+            c.execute("ALTER TABLE user_defaults ENABLE ROW LEVEL SECURITY")
+        except Exception:
+            pass
 
         c.execute("""
         CREATE TABLE IF NOT EXISTS upsc_pyq_analysis (

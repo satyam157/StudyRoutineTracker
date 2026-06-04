@@ -30,7 +30,7 @@ def render(USER, USER_CONFIG):
         
         # Load activities data
         daily_prod = {}
-        df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+        df = get_activities_df(USER)
         if not df.empty:
             if 'start_time' not in df.columns: df['start_time'] = None
             df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
@@ -109,6 +109,8 @@ def render(USER, USER_CONFIG):
             transition: all 0.25s ease, transform 0.2s ease;
             cursor: pointer;
             gap: 6px;
+            overflow: hidden;
+            min-width: 0;
         }
         .merged-cal-cell:hover {
             transform: translateY(-4px);
@@ -153,16 +155,41 @@ def render(USER, USER_CONFIG):
             line-height: 1.3;
         }
         .merged-cal-desc {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 500;
-            font-style: italic;
-            padding: 3px 5px;
-            border-radius: 4px;
+            padding: 3px 6px;
+            border-radius: 10px;
             line-height: 1.3;
-            opacity: 0.85;
+            opacity: 0.9;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: inline-block;
+            max-width: 100%;
+            box-sizing: border-box;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        /* Tablet */
+        @media (max-width: 900px) {
+            .merged-cal-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+            .merged-cal-header { font-size: 13px; padding: 10px 6px; }
+            .merged-cal-cell { min-height: 120px; padding: 10px 8px; }
+            .merged-cal-date { font-size: 19px; }
+            .merged-cal-prod { font-size: 10px; }
+            .merged-cal-health { font-size: 10px; }
+            .merged-cal-social { font-size: 10px; }
+            .merged-cal-desc { font-size: 8px; }
+        }
+        /* Mobile */
+        @media (max-width: 550px) {
+            .merged-cal-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+            .merged-cal-header { font-size: 12px; padding: 8px 4px; }
+            .merged-cal-cell { min-height: 100px; padding: 8px 6px; }
+            .merged-cal-date { font-size: 16px; }
+            .merged-cal-prod { font-size: 10px; }
+            .merged-cal-health { font-size: 9px; }
+            .merged-cal-social { font-size: 9px; }
+            .merged-cal-desc { font-size: 8px; }
         }
         </style>
         <div class="merged-cal-grid">
@@ -246,7 +273,7 @@ def render(USER, USER_CONFIG):
             # Description (free-text note)
             day_desc = daily_desc.get(date_str, '') if not is_future else ''
             if day_desc:
-                html += f"<div class='merged-cal-desc' style='background: rgba(255,255,255,0.1); color: {text_color}'>📝 {day_desc}</div>"
+                html += f"<div class='merged-cal-desc' style='background: rgba(255,255,255,0.2); color: {text_color}' title=\"{day_desc}\">💬 {day_desc}</div>"
             
             html += "</div>"
         
@@ -348,7 +375,8 @@ def render(USER, USER_CONFIG):
                         raw_desc = row.get('description')
                         desc_text = ""
                         if raw_desc and str(raw_desc).strip() and str(raw_desc).strip().lower() not in ('none', 'nan', 'null'):
-                            desc_text = f"<br><span style='font-size:12px; color:#94a3b8; font-weight:normal;'>{str(raw_desc).strip()}</span>"
+                            clean_desc = str(raw_desc).strip()
+                            desc_text = f" <span style='display:inline-block; font-size:11px; color:#cbd5e1; background:rgba(255, 255, 255, 0.1); border: 1px solid rgba(255,255,255,0.15); padding:2px 8px; border-radius:12px; font-weight:normal; margin-left:6px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;' title='{clean_desc}'>💬 {clean_desc}</span>"
                         
                         # Create inline activity display with delete button
                         _act_container = st.container()
@@ -389,7 +417,7 @@ def render(USER, USER_CONFIG):
         st.subheader("📊 Year Overview & Health/Social Heatmap")
         import calendar as calmod
     
-        df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+        df = get_activities_df(USER)
         if not df.empty:
             if 'start_time' not in df.columns: df['start_time'] = None
             df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)

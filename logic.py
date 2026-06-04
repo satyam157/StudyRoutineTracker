@@ -21,8 +21,8 @@ transport_services = ["Uber","Ola","Rapido"]
 test_types = ["Mock Test","Sectional","PYQ", "D-Day Exam"]
 
 PRODUCTIVE_TYPES = ["Study","Revision","Test", "Book Reading", "Answer Writing", "Practice"]
-ESSENTIAL_TYPES = ["Coaching", "Office", "WFH"]
-NEUTRAL_TYPES = ["Sleep", "Powernap", "Napping"]
+ESSENTIAL_TYPES = ["Coaching", "Office", "WFH", "Sleep", "Powernap", "Napping"]
+NEUTRAL_TYPES = []
 
 
 def calculate_sleep_hours(sleep_time_str, wakeup_time_str):
@@ -761,12 +761,12 @@ def calculate_top_streaks(df: pd.DataFrame, year=None, month=None):
     return top_streaks
 
 
-def get_top_hours_all_time(df: pd.DataFrame, type='productive'):
+def get_top_hours_all_time(df: pd.DataFrame, type='productive', sleep_intervals_list=None):
     """Find top 10 hours (0-23) with highest aggregate productive or waste time."""
     if df.empty:
         return []
     
-    prod_hrs, waste_hrs, _, _, _ = distribute_duration_across_hours(df)
+    prod_hrs, waste_hrs, _, _, _ = distribute_duration_across_hours(df, sleep_intervals_list=sleep_intervals_list)
     target_hrs = prod_hrs if type == 'productive' else waste_hrs
     
     hourly_stats = []

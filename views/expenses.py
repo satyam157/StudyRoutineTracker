@@ -16,7 +16,7 @@ def render(USER, USER_CONFIG):
     st.title("💰 Expenses")
     import ai as _ai_exp
     
-    df_full = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    df_full = get_activities_df(USER)
     df_full = df_full[df_full['amount'] > 0]
     
     # Keep only last 60 days for delete management view to prevent page lag

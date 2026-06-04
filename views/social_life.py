@@ -24,7 +24,7 @@ def render(USER, USER_CONFIG):
     with col2:
         selected_month = st.number_input("Month", value=today.month, min_value=1, max_value=12, key="sm_cal_mo", step=1)
     
-    df = read_sql("SELECT * FROM activities WHERE username=%s", (USER,))
+    df = get_activities_df(USER)
     if not df.empty:
         if 'start_time' not in df.columns: df['start_time'] = None
         df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)

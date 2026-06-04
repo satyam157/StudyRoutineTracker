@@ -153,6 +153,7 @@ def render(USER, USER_CONFIG):
         cursor: pointer;
         gap: 4px;
         overflow: hidden;
+        min-width: 0;
     }
     .sc-cal-cell:hover {
         transform: translateY(-4px);
@@ -303,7 +304,7 @@ def render(USER, USER_CONFIG):
             html += f"<div class='sc-act-item' style='color: {item_text_color}; background: rgba(255,255,255,0.1);' title=\"{tooltip}\">"
             html += f"<div>{label}</div>"
             if act_desc:
-                html += f"<div style='font-size: 9px; opacity: 0.9; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>{act_desc}</div>"
+                html += f"<div style='display: inline-block; font-size: 8px; margin-top: 3px; padding: 1px 5px; border-radius: 8px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; box-sizing: border-box;'>💬 {act_desc}</div>"
             html += "</div>"
         
         html += "</div>"
@@ -383,7 +384,8 @@ def render(USER, USER_CONFIG):
                     raw_desc = row.get('description')
                     desc_text = ""
                     if raw_desc and str(raw_desc).strip() and str(raw_desc).strip().lower() not in ('none', 'nan', 'null'):
-                        desc_text = f"<br><span style='font-size:12px; color:#94a3b8; font-weight:normal;'>{str(raw_desc).strip()}</span>"
+                        clean_desc = str(raw_desc).strip()
+                        desc_text = f" <span style='display:inline-block; font-size:11px; color:#cbd5e1; background:rgba(255, 255, 255, 0.1); border: 1px solid rgba(255,255,255,0.15); padding:2px 8px; border-radius:12px; font-weight:normal; margin-left:6px; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;' title='{clean_desc}'>💬 {clean_desc}</span>"
                     
                     _act_container = st.container()
                     with _act_container:
