@@ -554,14 +554,25 @@ def render(USER, USER_CONFIG):
                         pass
             _def_amt = float(_edit_amt) if (_editing_entry_id and _editing_entry.get('type') == activity) else 0.0
             
-            c1, c2 = st.columns(2)
-            with c1: 
-                from_time_raw = st.text_input("From Time", value=_def_st, key=f"de_from_{activity}", placeholder="2:30 PM")
-            with c2: 
-                to_time_raw = st.text_input("To Time", value=_def_to, key=f"de_to_{activity}", placeholder="4:45 PM")
+            from database import get_ist_now
+            _ist_now = get_ist_now()
+            _now_str = f"{_ist_now.hour}:{_ist_now.minute:02d}"
             
-            if from_time_raw and to_time_raw:
-                f_p, t_p = parse_time_value(from_time_raw), parse_time_value(to_time_raw)
+            c1, c2 = st.columns(2)
+            with c1:
+                from_time_raw = st.text_input("From Time", value=_def_st, key=f"de_from_{activity}", placeholder="e.g. 2:30 PM")
+            with c2:
+                to_time_raw = st.text_input("To Time", value=_def_to, key=f"de_to_{activity}", placeholder=f"Leave blank = now ({_now_str})")
+            
+            # If From Time filled but To Time empty, show hint that current time will be used
+            if from_time_raw and not to_time_raw:
+                st.info(f"ℹ️ 'To Time' is empty — submitting will use current time **{_now_str}** as end time.")
+            
+            # Use current time as To Time if not provided
+            _to_time_effective = to_time_raw if to_time_raw else (_now_str if from_time_raw else "")
+            
+            if from_time_raw and _to_time_effective:
+                f_p, t_p = parse_time_value(from_time_raw), parse_time_value(_to_time_effective)
                 if f_p and t_p:
                     from_h, from_m = f_p
                     to_h, to_m = t_p
@@ -572,7 +583,8 @@ def render(USER, USER_CONFIG):
                         duration_today = (1440 - f_mins) / 60
                         duration_tomorrow = t_mins / 60
                         duration = duration_today + duration_tomorrow
-                    else: duration = (t_mins - f_mins) / 60
+                    else:
+                        duration = (t_mins - f_mins) / 60
                     st.caption(f"Duration: **{format_duration(duration)}**" + (" (spans midnight ⏰)" if is_midnight_crossing else ""))
             if _track_both: amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=1.0, value=_def_amt if _duration_mode != "Hours" else 0.0, key=f"de_amt_tr_{activity}")
         
