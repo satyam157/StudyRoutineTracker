@@ -558,17 +558,26 @@ def render(USER, USER_CONFIG):
             _ist_now = get_ist_now()
             _now_str = f"{_ist_now.hour}:{_ist_now.minute:02d}"
             
+            # Explicitly seed session_state ONLY if key doesn't exist yet
+            # This prevents value= from resetting what user typed on each rerun
+            _from_key = f"de_from_{activity}"
+            _to_key = f"de_to_{activity}"
+            if _from_key not in st.session_state:
+                st.session_state[_from_key] = _def_st
+            if _to_key not in st.session_state:
+                st.session_state[_to_key] = _def_to
+            
             c1, c2 = st.columns(2)
             with c1:
-                from_time_raw = st.text_input("From Time", value=_def_st, key=f"de_from_{activity}", placeholder="e.g. 2:30 PM")
+                from_time_raw = st.text_input("From Time", key=_from_key, placeholder="e.g. 2:30 PM")
             with c2:
-                to_time_raw = st.text_input("To Time", value=_def_to, key=f"de_to_{activity}", placeholder=f"Leave blank = now ({_now_str})")
+                to_time_raw = st.text_input("To Time", key=_to_key, placeholder=f"Leave blank = now ({_now_str})")
             
             # If From Time filled but To Time empty, show hint that current time will be used
             if from_time_raw and not to_time_raw:
                 st.info(f"ℹ️ 'To Time' is empty — submitting will use current time **{_now_str}** as end time.")
             
-            # Use current time as To Time if not provided
+            # Use current time as To Time if not provided (only when From Time is set)
             _to_time_effective = to_time_raw if to_time_raw else (_now_str if from_time_raw else "")
             
             if from_time_raw and _to_time_effective:
