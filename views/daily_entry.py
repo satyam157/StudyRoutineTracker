@@ -604,6 +604,13 @@ def render(USER, USER_CONFIG):
 
 
         if save_clicked:
+            if duration <= 0.0 and amount <= 0.0:
+                if _duration_mode == "Time Range (From-To)":
+                    st.error("⚠️ Both 'From Time' and 'To Time' are required to calculate duration.")
+                else:
+                    st.error("⚠️ Please enter a valid duration or amount before submitting.")
+                st.stop()
+                
             entry_status = 'Completed'
             
             # Delete any active draft when submitting
