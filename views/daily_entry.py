@@ -374,7 +374,8 @@ def render(USER, USER_CONFIG):
                 sub2 = st.text_input("Chapter / Topic", value=_def_ch, max_chars=50, placeholder="Enter chapter/topic...", key="de_study_static_ch")
         elif activity == "Revision":
             _def_sub1, _def_sub2 = _user_defaults.get("Revision", ("", ""))
-            _rev_type = st.radio("Revision Type", ["Chapter", "Pages"], horizontal=True, key="de_rev_type")
+            _rev_idx = 1 if _def_sub1 == "Pages" else 0
+            _rev_type = st.radio("Revision Type", ["Chapter", "Pages"], index=_rev_idx, horizontal=True, key="de_rev_type")
             if _rev_type == "Chapter":
                 sub2 = st.text_input("Chapter Revised", value=_def_sub2, key="de_rev_ch")
             else:
