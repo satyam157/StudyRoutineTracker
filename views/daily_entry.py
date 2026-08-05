@@ -1121,9 +1121,23 @@ def render(USER, USER_CONFIG):
 
                 _study_html = ''
                 if _study_str:
-                    _study_html = f"""<div style="margin-top:8px; padding:8px 12px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:8px;">
+                    import re
+                    _formatted_studies = []
+                    for _study_item in _study_str.split(';'):
+                        if not _study_item.strip(): continue
+                        _match = re.match(r'^(.*?)\s*\((.*?)\)$', _study_item.strip())
+                        if _match:
+                            _subj, _chapters_raw = _match.groups()
+                            _chapters = [c.strip() for c in _chapters_raw.split(',') if c.strip()]
+                            _ch_html = "".join([f"<span style='background:rgba(167,139,250,0.2); color:#c4b5fd; border:1px solid rgba(167,139,250,0.3); padding:2px 6px; border-radius:6px; font-size:11px; margin-right:4px; display:inline-block; margin-bottom:2px;'>{c}</span>" for c in _chapters])
+                            _formatted_studies.append(f"<div style='margin-top:6px;'><span style='color:#e2e8f0; font-weight:600; font-size:13px; margin-right:6px;'>{_subj}</span> {_ch_html}</div>")
+                        else:
+                            _formatted_studies.append(f"<div style='margin-top:6px; color:#e2e8f0; font-size:13px;'>{_study_item.strip()}</div>")
+                    
+                    _study_content = "".join(_formatted_studies)
+                    _study_html = f"""<div style="margin-top:8px; padding:10px 14px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:10px;">
 <span style="color:#a78bfa; font-size:11px; font-weight:700;">📚 STUDY DURING TRIP</span><br>
-<span style="color:#e2e8f0; font-size:13px;">{_study_str}</span>
+{_study_content}
 </div>"""
 
                 _desc_html = ''
