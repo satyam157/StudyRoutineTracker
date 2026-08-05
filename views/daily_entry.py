@@ -912,6 +912,7 @@ def render(USER, USER_CONFIG):
             st.caption("Track chapters completed during this trip:")
             _lt_all_subjs = get_user_subjects(USER)
             _lt_study_entries = []
+            _lt_study_raw = []
             
             if not _lt_all_subjs:
                 st.info("You don't have any subjects added yet.")
@@ -934,6 +935,9 @@ def render(USER, USER_CONFIG):
                         )
                     if _subj_val and _subj_val.strip() and _ch_val and _ch_val.strip():
                         _lt_study_entries.append(f"{_subj_val.strip()} ({_ch_val.strip()})")
+                        # Also collect raw pairs for creating individual Study rows
+                        _ch_list = [c.strip() for c in _ch_val.split(',') if c.strip()]
+                        _lt_study_raw.append((_subj_val.strip(), _ch_list))
 
                 _sadd_col, _srem_col = st.columns([1, 1])
                 with _sadd_col:
@@ -982,6 +986,17 @@ def render(USER, USER_CONFIG):
                     "INSERT INTO activities (date, type, subject, chapter, duration, amount, username, start_time, description, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (str(_trip_start), 'Travelling', _trip_mode, _chapter_val, float(_num_trip_days), float(_trip_cost), USER, '', _desc_val, 'Completed')
                 )
+
+                # Insert individual Study activities for each chapter studied during the trip
+                # These will be counted in analysis, graphs, and target tracking
+                if _lt_study_raw:
+                    for _study_subj, _study_chapters in _lt_study_raw:
+                        for _ch_name in _study_chapters:
+                            c.execute(
+                                "INSERT INTO activities (date, type, subject, chapter, duration, amount, username, start_time, description, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (str(_trip_start), 'Study during trip', _study_subj, _ch_name, 0.0, 0.0, USER, '', f'During trip: {_dest_str}', 'Completed')
+                            )
+
                 conn.commit()
                 invalidate_activities_cache(USER)
                 # Reset destination and study counts
@@ -1248,7 +1263,7 @@ def render(USER, USER_CONFIG):
         </div>
         """, unsafe_allow_html=True)
     
-        _base_acts = [
+        _ACT_TYPES = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
             "Entertainment", "Social Media", "TalkOnCall", "Food", "Transport",
             "Office", "WFH", "Coaching", "WentOutside", "Turf", "Travelling"
@@ -1257,7 +1272,7 @@ def render(USER, USER_CONFIG):
         _custom_acts_df = read_sql("SELECT name FROM custom_boxes WHERE username=%s", (USER,))
         _custom_acts = _custom_acts_df['name'].tolist() if not _custom_acts_df.empty else []
         
-        all_config_acts = _base_acts + _custom_acts
+        all_config_acts = _ACT_TYPES + _custom_acts
         
         # Load existing defaults
         _current_defaults = get_user_defaults(USER)

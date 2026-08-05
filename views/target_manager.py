@@ -20,11 +20,13 @@ def render(USER, USER_CONFIG):
     
     tgt_df = read_sql("SELECT * FROM targets WHERE username=%s", (USER,))
     _all_act_df = get_activities_df(USER)
-    act_df = _all_act_df[_all_act_df['type'].isin(['Study','Revision','Test','Answer Writing','Practice','Book Reading'])].copy() if not _all_act_df.empty else pd.DataFrame()
+    act_df = _all_act_df[_all_act_df['type'].isin(['Study', 'Study during trip', 'Revision','Test','Answer Writing','Practice','Book Reading'])].copy() if not _all_act_df.empty else pd.DataFrame()
     if not act_df.empty:
         if 'start_time' not in act_df.columns: act_df['start_time'] = None
         act_df['start_time'] = act_df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
         act_df['chapter'] = act_df['chapter'].apply(get_clean_chapter)
+        act_df['chapter'] = act_df['chapter'].astype(str).str.replace(r'(?i)\bbookstawa\b', 'Bkstawa', regex=True)
+        act_df['chapter'] = act_df['chapter'].astype(str).str.replace(r'(?i)newspaper\s*\([^)]*\)', 'News', regex=True).str.replace(r'(?i)\bnewspaper\b', 'News', regex=True)
     
     if tgt_df.empty:
         st.info("No targets yet. Go to **Set Target** to create one.")
@@ -42,13 +44,59 @@ def render(USER, USER_CONFIG):
             if end_date:
                 df = df[df['_date'] <= pd.to_datetime(end_date).date()]
             return df
+
+        def _effective_start(t):
+            """Return the effective start date for a target.
+            Uses the explicit start_date (stored in start_time col) if set,
+            otherwise falls back to date_created."""
+            sd = t.get('start_time') or ''
+            if sd and str(sd).strip() and str(sd).strip().lower() not in ('none', 'nan', 'null'):
+                return str(sd).strip()
+            return t.get('date_created') or ''
+
+        def _get_target_display_name(t, all_tgt_df):
+            """Return distinct target name with Month & Year if subject name conflicts."""
+            sub = str(t.get('subject', ''))
+            if all_tgt_df is None or all_tgt_df.empty:
+                return sub
+            same_subs = all_tgt_df[all_tgt_df['subject'].astype(str).str.strip().str.lower() == sub.strip().lower()]
+            if len(same_subs) > 1:
+                eff_start = _effective_start(t)
+                try:
+                    dt = pd.to_datetime(eff_start)
+                    month_year = dt.strftime('%b %Y')
+                    return f"{sub} ({month_year})"
+                except Exception:
+                    return sub
+            return sub
     
+        # ── Aug-12 IR split: before → mpuri-IR, from Aug12 → IR ──────────────
+        _IR_CUTOFF = _ta_dt.date(2026, 8, 12)
+        _IR_NAMES   = {'ir', 'international relations', 'international relation'}
+
+        def _resolve_subject(t_subject, t_date_created):
+            """Return the subject name to match in act_df based on IR cutoff rule."""
+            if str(t_subject).strip().lower() in _IR_NAMES:
+                try:
+                    dc = pd.to_datetime(t_date_created).date()
+                except Exception:
+                    dc = _ta_dt.date.today()
+                if dc < _IR_CUTOFF:
+                    return 'mpuri-IR'
+                else:
+                    return 'IR'
+            return t_subject
+
         def _compute_progress(t, all_act_df):
             """Return (done, total, percent) by goal_type."""
-            sub       = t['subject']
+            sub       = _resolve_subject(t['subject'], t.get('date_created'))
             goal_unit = (t.get('goal_unit') or 'Chapters')
             total     = int(t['total_chapters'])
-            sub_acts  = _filter_period(all_act_df[all_act_df['subject'] == sub], t.get('date_created')).copy()
+            eff_start = _effective_start(t)
+            sub_acts  = _filter_period(
+                all_act_df[all_act_df['subject'] == sub],
+                eff_start
+            ).copy()
             
             # Use cleaned chapter names for unique counting
             sub_acts['clean_ch'] = sub_acts['chapter'].apply(get_clean_chapter)
@@ -75,10 +123,12 @@ def render(USER, USER_CONFIG):
             percent = round(min((done / total) * 100, 100), 1) if total > 0 else (0 if done == 0 else 100)
             return done, total, percent
     
-        def _detail_table(sub, date_created, achieved_date, all_act_df, goal_unit):
+        def _detail_table(sub_raw, date_created, achieved_date, all_act_df, goal_unit, t=None):
             """Return (primary_df, secondary_df) for the goal type."""
+            sub = _resolve_subject(sub_raw, date_created)
+            eff_start = _effective_start(t) if t is not None else (date_created or '')
             sub_acts = _filter_period(
-                all_act_df[all_act_df['subject'] == sub], date_created, achieved_date
+                all_act_df[all_act_df['subject'] == sub], eff_start, achieved_date
             )
             sub_acts = sub_acts[
                 sub_acts['chapter'].notna() & (sub_acts['chapter'].astype(str).str.strip() != '')
@@ -158,16 +208,22 @@ def render(USER, USER_CONFIG):
                 active_targets.append(entry)
     
         # Shared card renderer
-        def _render_card(t, achieved_on=None, expanded=True):
+        def _render_card(t, achieved_on=None, expanded=None):
             sub       = t['subject']
+            disp_sub  = _get_target_display_name(t, tgt_df)
             tid       = t['id']
             goal_unit = t['_goal_unit']
             done      = t['_done']
             total     = int(t['total_chapters'])
             percent   = t['_percent']
             stored_insight = t.get('ai_feedback', '') or ''
+            eff_start = _effective_start(t)
     
-            sub_acts    = act_df[act_df['subject'] == sub].copy()
+            sub_acts    = _filter_period(
+                act_df[act_df['subject'] == _resolve_subject(sub, t.get('date_created'))],
+                eff_start,
+                achieved_on
+            ).copy()
             sub_acts['clean_ch'] = sub_acts['chapter'].apply(get_clean_chapter)
             
             hours_taken = format_duration(sub_acts['duration'].sum())
@@ -177,11 +233,22 @@ def render(USER, USER_CONFIG):
     
             label  = f"{format_duration(done)}" if goal_unit == _HOURS_TYPE else str(done)
             icon   = "✅" if percent >= 100 else "🔵"
-            header = f"{icon} {sub} — {percent}% ({label}/{total} {goal_unit})"
+            header = f"{icon} {disp_sub} — {percent}% ({label}/{total} {goal_unit})"
             if achieved_on:
                 header += "  🎉"
     
-            with st.expander(header, expanded=expanded):
+            # Compute effective start date for display
+            _eff_start_disp = _effective_start(t)
+            # Show resolved IR label in header if subject remapped
+            _resolved_sub_disp = _resolve_subject(sub, t.get('date_created'))
+            _sub_label = f"{disp_sub} → [{_resolved_sub_disp}]" if _resolved_sub_disp != sub else disp_sub
+
+            is_open = (percent > 0) if expanded is None else (bool(expanded) and percent > 0)
+            with st.expander(header, expanded=is_open):
+                # Start date info bar
+                st.caption(f"📅 Counting from: **{_eff_start_disp or t.get('date_created', 'N/A')}**"
+                           + (f"  |  🗂️ Mapped to: **{_resolved_sub_disp}**" if _resolved_sub_disp != sub else ""))
+
                 mc1, mc2, mc3, mc4, mc5 = st.columns([1.5, 1, 1, 1, 1.5])
                 
                 with mc1:
@@ -210,7 +277,6 @@ def render(USER, USER_CONFIG):
     
                 mc2.metric("Goal",     f"{total} {goal_unit}")
                 mc3.metric("Done",     f"{label} {goal_unit}")
-                # mc4 was previously mc3 (Progress)
                 mc4.metric("Total Time", hours_taken)
                 if achieved_on:
                     mc5.metric("Completed On", str(achieved_on))
@@ -227,7 +293,7 @@ def render(USER, USER_CONFIG):
     
                 with st.expander(exp_label, expanded=False):
                     primary, secondary = _detail_table(
-                        sub, t.get('date_created'), achieved_on, act_df, goal_unit
+                        sub, t.get('date_created'), achieved_on, act_df, goal_unit, t=t
                     )
                     if primary is None:
                         st.caption("No matching entries logged yet for this target.")
@@ -251,15 +317,19 @@ def render(USER, USER_CONFIG):
             st.info("No active targets. All targets are completed! 🎉")
         else:
             for t in active_targets:
-                _render_card(t, achieved_on=None, expanded=True)
+                _render_card(t, achieved_on=None)
     
         st.markdown("#### ✅ Completed Targets")
         if not achieved_targets:
             st.info("No targets have reached 100% yet. Keep going! 💪")
         else:
             for t in achieved_targets:
-                sub      = t['subject']
-                sub_acts = act_df[act_df['subject'] == sub]
+                sub       = t['subject']
+                eff_start = _effective_start(t)
+                sub_acts  = _filter_period(
+                    act_df[act_df['subject'] == _resolve_subject(sub, t.get('date_created'))],
+                    eff_start
+                )
                 achieved_on = None
                 if not sub_acts.empty:
                     dated = sub_acts[
@@ -272,17 +342,137 @@ def render(USER, USER_CONFIG):
     
         # ── WEAK SUBJECTS (bottom) ────────────────────────────────────────────
         st.subheader("📉 Weak Subjects (Least Studied & Revised)")
-        study_acts = act_df[act_df['type'].isin(['Study', 'Revision'])]
+        study_acts = act_df[act_df['type'].isin(['Study', 'Study during trip', 'Revision'])]
         if study_acts.empty:
             st.info("No study entries yet.")
         else:
             subj_hours = study_acts.groupby('subject')['duration'].sum().sort_values()
             
-            # Summary Metrics
-            st.markdown("### 📊 Study & Revision Hours by Subject")
-            st.dataframe(subj_hours.reset_index().rename(columns={'subject':'Subject','duration':'Hours'}),
-                         width='stretch')
-            st.bar_chart(subj_hours)
+            def get_grouped(df):
+                if df.empty:
+                    return None
+                
+                def _format_number_ranges(numbers):
+                    if not numbers:
+                        return []
+                    nums = sorted(list(set(numbers)))
+                    ranges = []
+                    start = nums[0]
+                    prev = nums[0]
+                    for n in nums[1:]:
+                        if n == prev + 1:
+                            prev = n
+                        else:
+                            ranges.append(str(start) if start == prev else f"{start}-{prev}")
+                            start = n
+                            prev = n
+                    ranges.append(str(start) if start == prev else f"{start}-{prev}")
+                    return ranges
+
+                def _shorten_word(w):
+                    if 'pill' in w.lower():
+                        return w
+                    m = re.match(r'^([^\w]*)([\w]+)([^\w]*)$', w)
+                    if m:
+                        pre, core, post = m.groups()
+                        if core.lower() in ('bkstawa', 'bookstawa'):
+                            return f"{pre}Bkstawa{post}"
+                        if core.lower() == 'news':
+                            return f"{pre}News{post}"
+                        if len(core) > 3 and not core.isdigit():
+                            core = core[:3]
+                        return f"{pre}{core}{post}"
+                    elif w.lower() in ('bkstawa', 'bookstawa'):
+                        return 'Bkstawa'
+                    elif w.lower() == 'news':
+                        return 'News'
+                    elif len(w) > 3 and not w.isdigit():
+                        return w[:3]
+                    return w
+
+                def _shorten_text(text):
+                    words = text.split()
+                    shortened = [_shorten_word(w) for w in words]
+                    return ' '.join(shortened)
+
+                def _process_chapters(x):
+                    import re
+                    items = []
+                    for s in x.dropna().astype(str):
+                        s = s.strip()
+                        if not s: continue
+                        s = get_clean_chapter(s)
+                        s = re.sub(r'(?i)\bbookstawa\b', 'Bkstawa', s)
+                        s = re.sub(r'(?i)newspaper\s*\([^)]*\)', 'News', s)
+                        s = re.sub(r'(?i)\bnewspaper\b', 'News', s)
+                        # Split by both | and ,
+                        parts = [p.strip() for p in re.split(r'[|,]', s) if p.strip()]
+                        for p in parts:
+                            pl = p.lower()
+                            if pl in ('none', 'nan', 'null', ''): continue
+                            if 'rishika' in pl: continue
+                            # Normalize 'chapter 8' / 'ch 8' / 'ch8' / 'chapter8' -> '8'
+                            m = re.match(r'^(?:chapter|ch\.?)\s*(\d+)$', p.strip(), re.IGNORECASE)
+                            if m:
+                                items.append(m.group(1))
+                            else:
+                                items.append(p.strip())
+
+                    num_items = []
+                    text_items = []
+                    for item in items:
+                        if item.isdigit():
+                            num_items.append(int(item))
+                        else:
+                            sh_item = _shorten_text(item)
+                            if sh_item and sh_item not in text_items:
+                                text_items.append(sh_item)
+
+                    formatted_nums = _format_number_ranges(num_items)
+                    all_res = formatted_nums + text_items
+                    return ' | '.join(all_res)
+
+                grp = df.groupby('subject').agg({
+                    'duration': 'sum',
+                    'chapter': _process_chapters
+                }).reset_index()
+                
+                # Keep CSAT and Current Affairs at the bottom, sort all subjects in descending order
+                _bottom_subjects = {'csat', 'current affairs'}
+                grp['_is_bottom'] = grp['subject'].astype(str).str.strip().str.lower().isin(_bottom_subjects)
+                grp = grp.sort_values(by=['_is_bottom', 'duration'], ascending=[True, False]).drop(columns=['_is_bottom'])
+
+                result = grp.rename(columns={
+                    'subject': 'Subject',
+                    'duration': 'Hours',
+                    'chapter': 'Chapters/Pages Finished'
+                })
+                # Format hours as human-readable
+                result['Hours'] = result['Hours'].apply(format_duration)
+                return result
+
+            study_grp = get_grouped(act_df[act_df['type'].isin(['Study', 'Study during trip'])])
+            rev_grp = get_grouped(act_df[act_df['type'].isin(['Revision', 'Study during trip'])])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### 📖 Study Hours by Subject")
+                if study_grp is not None:
+                    st.dataframe(study_grp, width='stretch')
+                else:
+                    st.info("No study entries.")
+                    
+            with col2:
+                st.markdown("### 🔄 Revision Hours by Subject")
+                if rev_grp is not None:
+                    st.dataframe(rev_grp, width='stretch')
+                else:
+                    st.info("No revision entries.")
+
+            st.markdown("### 📈 Overall Distribution (Study + Revision)")
+            # Use raw hours (before format_duration) for bar chart
+            subj_hours_chart = act_df[act_df['type'].isin(['Study', 'Study during trip', 'Revision'])].groupby('subject')['duration'].sum().sort_values()
+            st.bar_chart(subj_hours_chart)
             
             # Analysis Section
             st.markdown("### 💡 Weak Subjects Analysis")

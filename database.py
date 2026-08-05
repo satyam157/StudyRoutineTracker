@@ -312,6 +312,10 @@ if c is not None:
         except Exception:
             pass
         try:
+            c.execute("ALTER TABLE targets ADD COLUMN start_time TEXT DEFAULT NULL")
+        except Exception:
+            pass
+        try:
             c.execute("ALTER TABLE custom_boxes ADD COLUMN tracking_type TEXT DEFAULT 'Hours'")
         except Exception:
             pass

@@ -215,6 +215,27 @@ def render(USER, USER_CONFIG):
             "white": ("#ffffff", "#000000")
         }
         
+        # Parse Trips for display
+        active_trips = []
+        if not df.empty:
+            for _, row in df[df['type'] == 'Travelling'].iterrows():
+                try:
+                    start_date = pd.to_datetime(row['date']).date()
+                    dur = int(float(row['duration'])) if pd.notna(row['duration']) else 1
+                    if dur < 1: dur = 1
+                    end_date = start_date + datetime.timedelta(days=dur - 1)
+                    desc = str(row['description']) if pd.notna(row['description']) else ""
+                    if desc.startswith("END:"):
+                        try:
+                            end_part = desc.split('|')[0].replace('END:', '').strip()
+                            end_date = pd.to_datetime(end_part).date()
+                        except: pass
+                    ch = str(row['chapter']) if pd.notna(row['chapter']) else ""
+                    dest = ch.split(' | ')[0] if ' | ' in ch else ch
+                    active_trips.append({'start': start_date, 'end': end_date, 'dest': dest})
+                except: pass
+
+        
         # Days of the month
         for day in range(1, num_days + 1):
             date_str = f"{int(selected_year)}-{int(selected_month):02d}-{day:02d}"
@@ -274,6 +295,13 @@ def render(USER, USER_CONFIG):
             day_desc = daily_desc.get(date_str, '') if not is_future else ''
             if day_desc:
                 html += f"<div class='merged-cal-desc' style='background: rgba(255,255,255,0.2); color: {text_color}' title=\"{day_desc}\">💬 {day_desc}</div>"
+            
+            # Show active trip
+            date_obj = datetime.date(int(selected_year), int(selected_month), day)
+            for t in active_trips:
+                if t['start'] <= date_obj <= t['end']:
+                    html += f"<div class='merged-cal-social' style='background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); text-align: center;' title='Trip to {t['dest']}'>✈️ Trip - {t['dest']}</div>"
+                    break
             
             html += "</div>"
         
@@ -355,6 +383,8 @@ def render(USER, USER_CONFIG):
                         act_type = row['type']
                         if act_type == 'WentOutside':
                             act_type = 'WentOut'
+                        elif act_type == 'Travelling':
+                            act_type = 'Trip'
                         _parts = [act_type]
                         if row['subject']: _parts.append(str(row['subject']))
                         
@@ -365,9 +395,13 @@ def render(USER, USER_CONFIG):
                             if hr is not None: st_val = f"{hr}:00"
                         
                         if ch_clean: _parts.append(ch_clean)
-                        if st_val: _parts.append(f"[{st_val}]")
+                        if st_val and str(st_val).strip().lower() not in ('nan', 'none', 'null'):
+                            _parts.append(f"[{st_val}]")
                         
-                        _val = format_duration(row['duration']) if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
+                        if row['type'] == 'Travelling':
+                            _val = ""
+                        else:
+                            _val = format_duration(row['duration']) if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
                         if _val: _parts.append(_val)
                         
                         activity_text = ' | '.join(_parts)

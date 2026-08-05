@@ -63,7 +63,7 @@ def render(USER, USER_CONFIG):
     
     # Calculate key metrics
     if not df_all.empty:
-        prod_df = df_all[df_all['type'].isin(['Study', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Test'])]
+        prod_df = df_all[df_all['type'].isin(['Study', 'Study during trip', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Test'])]
         essential_df = df_all[df_all['type'].isin(['Office', 'WFH', 'Coaching'])]
         waste_df_esu = df_all[df_all['type'].isin(['Entertainment', 'Social Media'])]
         

@@ -42,6 +42,32 @@ def render(USER, USER_CONFIG):
         for d, g in sm_df.groupby("date"):
             daily_sm[str(d)] = g.to_dict('records')
             
+        # Expand multi-day trips so they appear golden across all dates
+        for _, row in sm_df[sm_df['type'] == 'Travelling'].iterrows():
+            start_date = pd.to_datetime(row['date'])
+            try:
+                dur = int(float(row['duration']))
+            except:
+                dur = 1
+            if dur < 1: dur = 1
+            
+            end_date = start_date + datetime.timedelta(days=dur - 1)
+            desc = str(row['description']) if pd.notna(row['description']) else ""
+            if desc.startswith("END:"):
+                try:
+                    end_part = desc.split('|')[0].replace('END:', '').strip()
+                    end_date = pd.to_datetime(end_part)
+                except: pass
+            
+            current_date = start_date + datetime.timedelta(days=1)
+            while current_date <= end_date:
+                d_str = str(current_date.date())
+                if d_str not in daily_sm:
+                    daily_sm[d_str] = []
+                trip_copy = row.to_dict()
+                daily_sm[d_str].append(trip_copy)
+                current_date += datetime.timedelta(days=1)
+
     month_name = calmod.month_name[int(selected_month)]
     st.subheader(f"{month_name} {int(selected_year)}")
     
@@ -193,19 +219,22 @@ def render(USER, USER_CONFIG):
             act_type = act['type']
             
             # Display label overrides (cosmetic only, data unchanged)
-            _DISPLAY_LABEL = {'WentOutside': 'WentOut'}
+            _DISPLAY_LABEL = {'WentOutside': 'WentOut', 'Travelling': 'Trip'}
             display_type = _DISPLAY_LABEL.get(act_type, act_type)
             
             dur = act.get('duration', 0) or 0
             amt = act.get('amount', 0) or 0
             
             # Duration formatting
-            if dur > 0:
-                val = format_duration(dur)
-            elif amt > 0:
-                val = f"₹{amt}"
-            else:
+            if act_type == 'Travelling':
                 val = ""
+            else:
+                if dur > 0:
+                    val = format_duration(dur)
+                elif amt > 0:
+                    val = f"₹{amt}"
+                else:
+                    val = ""
             
             desc = ""
             if act['subject'] and act['subject'] != 'D-Day Exam': desc += str(act['subject']) + " "
@@ -214,7 +243,9 @@ def render(USER, USER_CONFIG):
             if raw_act_desc and str(raw_act_desc).strip() and str(raw_act_desc).strip().lower() not in ('none', 'nan', 'null'):
                 desc += (" " if desc else "") + str(raw_act_desc).strip()
             
-            time_str = f"[{act['start_time']}] " if act.get('start_time') else ""
+            time_str = ""
+            if act.get('start_time') and str(act['start_time']).strip().lower() not in ('nan', 'none', 'null'):
+                time_str = f"[{act['start_time']}] "
             
             main_text = f"{time_str}{display_type}"
             if val: main_text += f" ({val})"
@@ -223,7 +254,7 @@ def render(USER, USER_CONFIG):
             tag_bg = "rgba(255,255,255,0.15)"
             tag_text = cell_text
             
-            if act_type == 'WentOutside' and cell_bg != '#fbbf24':
+            if act_type in ('WentOutside', 'Travelling') and cell_bg != '#fbbf24':
                 tag_text = '#fbbf24'
 
             
@@ -312,6 +343,8 @@ def render(USER, USER_CONFIG):
                     act_type = row['type']
                     if act_type == 'WentOutside':
                         act_type = 'WentOut'
+                    elif act_type == 'Travelling':
+                        act_type = 'Trip'
                     _parts = [act_type]
                     if row['subject']: _parts.append(str(row['subject']))
                     
@@ -322,9 +355,13 @@ def render(USER, USER_CONFIG):
                         if hr is not None: st_val = f"{hr}:00"
                     
                     if ch_clean: _parts.append(ch_clean)
-                    if st_val: _parts.append(f"[{st_val}]")
+                    if st_val and str(st_val).strip().lower() not in ('nan', 'none', 'null'):
+                        _parts.append(f"[{st_val}]")
                     
-                    _val = format_duration(row['duration']) if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
+                    if row['type'] == 'Travelling':
+                        _val = ""
+                    else:
+                        _val = format_duration(row['duration']) if row['duration'] > 0 else (f"₹{row['amount']}" if row['amount'] > 0 else "")
                     if _val: _parts.append(_val)
                     
                     activity_text = ' | '.join(_parts)

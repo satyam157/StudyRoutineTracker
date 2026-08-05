@@ -20,7 +20,7 @@ transport_services = ["Uber","Ola","Rapido"]
 
 test_types = ["Mock Test","Sectional","PYQ", "D-Day Exam"]
 
-PRODUCTIVE_TYPES = ["Study","Revision","Test", "Book Reading", "Answer Writing", "Practice"]
+PRODUCTIVE_TYPES = ["Study", "Study during trip", "Revision","Test", "Book Reading", "Answer Writing", "Practice"]
 ESSENTIAL_TYPES = ["Coaching", "Office", "WFH", "Sleep", "Powernap", "Napping"]
 NEUTRAL_TYPES = []
 

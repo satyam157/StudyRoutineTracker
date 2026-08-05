@@ -195,22 +195,34 @@ def get_song_lists():
     return all_mp3s, song_options_dict, song_names_list
 
 def format_duration(dur):
-    if dur is None or dur <= 0:
+    """Convert decimal hours to human-readable 'Xhr Ymin Zsec' format.
+    e.g. 54.456 -> '54hr 27min 21sec'
+    """
+    if dur is None:
         return ""
     try:
         dur = float(dur)
     except:
         return ""
-    hours = int(dur)
-    minutes = int(round((dur - hours) * 60))
-    if minutes == 60:
-        hours += 1
-        minutes = 0
-    if hours > 0 and minutes > 0:
-        return f"{hours}Hr{minutes}M"
+    if dur <= 0:
+        return ""
+    total_seconds = int(round(dur * 3600))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    if hours > 0 and minutes > 0 and seconds > 0:
+        return f"{hours}hr {minutes}min {seconds}sec"
+    elif hours > 0 and minutes > 0:
+        return f"{hours}hr {minutes}min"
+    elif hours > 0 and seconds > 0:
+        return f"{hours}hr {seconds}sec"
     elif hours > 0:
-        return f"{hours}Hr"
+        return f"{hours}hr"
+    elif minutes > 0 and seconds > 0:
+        return f"{minutes}min {seconds}sec"
+    elif minutes > 0:
+        return f"{minutes}min"
     else:
-        return f"{minutes}M"
+        return f"{seconds}sec"
 
 
