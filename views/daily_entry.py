@@ -1093,7 +1093,8 @@ def render(USER, USER_CONFIG):
             </div>""", unsafe_allow_html=True)
 
             # Render trip cards
-            for trip in trips:
+            for idx, trip in enumerate(trips):
+                _trip_num = len(trips) - idx
                 _start = trip['start_date']
                 _end = trip['end_date']
                 _num_days = trip['num_days']
@@ -1120,50 +1121,46 @@ def render(USER, USER_CONFIG):
                 _study_html = ''
                 if _study_str:
                     _study_html = f"""<div style="margin-top:8px; padding:8px 12px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:8px;">
-                        <span style="color:#a78bfa; font-size:11px; font-weight:700;">📚 STUDY DURING TRIP</span><br>
-                        <span style="color:#e2e8f0; font-size:13px;">{_study_str}</span>
-                    </div>"""
+<span style="color:#a78bfa; font-size:11px; font-weight:700;">📚 STUDY DURING TRIP</span><br>
+<span style="color:#e2e8f0; font-size:13px;">{_study_str}</span>
+</div>"""
 
                 _desc_html = ''
                 if _desc_str:
                     _desc_html = f"""<div style="margin-top:6px; font-size:12px; color:#94a3b8; font-style:italic;">💬 {_desc_str}</div>"""
 
+                # Left-align to prevent Markdown from rendering it as an indented code block
                 st.markdown(f"""
-                <div style="
-                    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-                    border: 1.5px solid #334155;
-                    border-left: 4px solid #fbbf24;
-                    border-radius: 14px;
-                    padding: 18px 22px;
-                    margin-bottom: 14px;
-                ">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-                        <div>
-                            <div style="font-size:20px; font-weight:800; color:#fbbf24; margin-bottom:4px;">📍 {_dest}</div>
-                            <div style="font-size:13px; color:#94a3b8;">{_date_range}</div>
-                        </div>
-                        <div style="background:rgba(251,191,36,0.15); padding:6px 14px; border-radius:20px; border:1px solid rgba(251,191,36,0.3);">
-                            <span style="color:#fbbf24; font-size:14px; font-weight:700;">{_dur_str}</span>
-                        </div>
-                    </div>
-                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:14px;">
-                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
-                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">🚗 TRANSPORT</div>
-                            <div style="color:#e2e8f0; font-size:14px; font-weight:700; margin-top:2px;">{_transport_str}</div>
-                        </div>
-                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
-                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">💰 COST</div>
-                            <div style="color:#22c55e; font-size:14px; font-weight:700; margin-top:2px;">{_cost_str}</div>
-                        </div>
-                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
-                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">📅 DAYS</div>
-                            <div style="color:#fbbf24; font-size:14px; font-weight:700; margin-top:2px;">{_num_days}</div>
-                        </div>
-                    </div>
-                    {_study_html}
-                    {_desc_html}
-                </div>
-                """, unsafe_allow_html=True)
+<div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 1.5px solid #334155; border-left: 4px solid #fbbf24; border-radius: 14px; padding: 18px 22px; margin-bottom: 14px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+        <div>
+            <div style="font-size:20px; font-weight:800; color:#fbbf24; margin-bottom:4px;">
+                <span style="color:#64748b; font-size:16px;">#{_trip_num}</span> 📍 {_dest}
+            </div>
+            <div style="font-size:13px; color:#94a3b8;">{_date_range}</div>
+        </div>
+        <div style="background:rgba(251,191,36,0.15); padding:6px 14px; border-radius:20px; border:1px solid rgba(251,191,36,0.3);">
+            <span style="color:#fbbf24; font-size:14px; font-weight:700;">{_dur_str}</span>
+        </div>
+    </div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:14px;">
+        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+            <div style="color:#94a3b8; font-size:11px; font-weight:600;">🚗 TRANSPORT</div>
+            <div style="color:#e2e8f0; font-size:14px; font-weight:700; margin-top:2px;">{_transport_str}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+            <div style="color:#94a3b8; font-size:11px; font-weight:600;">💰 COST</div>
+            <div style="color:#22c55e; font-size:14px; font-weight:700; margin-top:2px;">{_cost_str}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+            <div style="color:#94a3b8; font-size:11px; font-weight:600;">📅 DAYS</div>
+            <div style="color:#fbbf24; font-size:14px; font-weight:700; margin-top:2px;">{_num_days}</div>
+        </div>
+    </div>
+    {_study_html}
+    {_desc_html}
+</div>
+""", unsafe_allow_html=True)
 
                 # Delete button for new-format trips (single entry)
                 if trip.get('is_new_fmt') and trip.get('id'):
