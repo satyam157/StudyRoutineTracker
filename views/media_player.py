@@ -108,7 +108,10 @@ def render(USER, USER_CONFIG):
                     st.session_state.music_idx = idx
                 else:
                     st.session_state.music_idx = (st.session_state.music_idx + 1) % len(song_names_list)
-    
+                if song_names_list and st.session_state.music_idx < len(song_names_list):
+                    st.session_state["_mp_song_sel"] = song_names_list[st.session_state.music_idx]
+                    st.session_state["sidebar_song_selector"] = song_names_list[st.session_state.music_idx]
+
             def _mp_prev():
                 st.session_state.music_playing = True
                 if st.session_state.music_shuffle:
@@ -118,12 +121,16 @@ def render(USER, USER_CONFIG):
                     st.session_state.music_idx = idx
                 else:
                     st.session_state.music_idx = (st.session_state.music_idx - 1) % len(song_names_list)
-    
+                if song_names_list and st.session_state.music_idx < len(song_names_list):
+                    st.session_state["_mp_song_sel"] = song_names_list[st.session_state.music_idx]
+                    st.session_state["sidebar_song_selector"] = song_names_list[st.session_state.music_idx]
+
             def _mp_on_sel():
                 if st.session_state._mp_song_sel in song_names_list:
                     st.session_state.music_idx = song_names_list.index(st.session_state._mp_song_sel)
+                    st.session_state["sidebar_song_selector"] = st.session_state._mp_song_sel
                     st.session_state.music_playing = True
-    
+
             st.selectbox("Select Song", options=song_names_list,
                          index=st.session_state.music_idx,
                          key="_mp_song_sel", on_change=_mp_on_sel,

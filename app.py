@@ -230,16 +230,72 @@ if conn is None:
     st.error("🚨 CRITICAL: PostgreSQL Database Connection Failed! Please ensure PostgreSQL is installed, running locally, and credentials match the .env configuration. The app cannot proceed without a database.")
     st.stop()
 
+from database import (
+    create_user_session,
+    validate_user_session,
+    delete_user_session
+)
+import extra_streamlit_components as stx
+
+cookie_manager = None
+try:
+    cookie_manager = stx.CookieManager(key="auth_cookies")
+except Exception:
+    cookie_manager = None
+
 if "username" not in st.session_state:
-    if "usr" in st.query_params:
-        st.session_state["username"] = st.query_params["usr"]
-    else:
+    st.session_state["username"] = None
+
+# Automatic session restoration: Check persistent session token (query_params or cookie)
+if st.session_state["username"] is None:
+    auth_token = st.query_params.get("st_auth", "").strip() if "st_auth" in st.query_params else None
+    if not auth_token and cookie_manager:
+        try:
+            c_val = cookie_manager.get("st_auth")
+            if c_val:
+                auth_token = str(c_val).strip()
+        except Exception:
+            auth_token = None
+
+    if auth_token:
+        valid_user = validate_user_session(auth_token, extend_days=3)
+        if valid_user:
+            st.session_state["username"] = valid_user
+            st.query_params["st_auth"] = auth_token
+        else:
+            if "st_auth" in st.query_params:
+                del st.query_params["st_auth"]
+            if cookie_manager:
+                try:
+                    cookie_manager.delete("st_auth")
+                except Exception:
+                    pass
+
+# Security Check: Prevent URL parameter tampering (e.g. ?usr=sneha) from hijacking session or switching user without login
+if st.session_state["username"] is not None and "usr" in st.query_params:
+    qp_usr = st.query_params.get("usr", "").strip()
+    if qp_usr and qp_usr.lower() != st.session_state["username"].lower():
+        # User changed URL parameter to another user while logged in! Revoke session.
+        cur_token = st.query_params.get("st_auth")
+        if cur_token:
+            delete_user_session(cur_token)
         st.session_state["username"] = None
+        if "st_auth" in st.query_params:
+            del st.query_params["st_auth"]
+        if "usr" in st.query_params:
+            del st.query_params["usr"]
+        st.error("🔒 Security Alert: URL user parameter mismatch. Access denied. Please log in with valid credentials.")
+        st.rerun()
+    else:
+        # Clean URL query param for logged-in user to prevent URL parameter sharing security risk
+        if "usr" in st.query_params:
+            del st.query_params["usr"]
 
 if st.session_state["username"] is None:
+    default_usr_input = st.query_params.get("usr", "").strip() if "usr" in st.query_params else ""
     st.title("🔐 Login to Study Routine Tracker")
     with st.form("login_form"):
-        usr = st.text_input("Username")
+        usr = st.text_input("Username", value=default_usr_input)
         pwd = st.text_input("Password", type="password")
         if st.form_submit_button("Login"):
             try:
@@ -263,9 +319,27 @@ if st.session_state["username"] is None:
                             upd_conn.close()
                         except Exception as log_err:
                             st.sidebar.error(f"Login log failed: {log_err}")
-                            
+
+                        # Create persistent 3-day session
+                        sess_token = create_user_session(usr.strip(), duration_days=3)
+                        if sess_token:
+                            st.query_params["st_auth"] = sess_token
+                            if cookie_manager:
+                                try:
+                                    import datetime as _dt
+                                    cookie_manager.set(
+                                        "st_auth",
+                                        sess_token,
+                                        key="set_st_auth_cookie",
+                                        expires_at=_dt.datetime.now() + _dt.timedelta(days=3),
+                                        max_age=259200
+                                    )
+                                except Exception:
+                                    pass
+
                         st.session_state["username"] = usr.strip()
-                        st.query_params["usr"] = usr.strip()
+                        if "usr" in st.query_params:
+                            del st.query_params["usr"]
                         st.rerun()
                     else:
                         st.error("Invalid credentials")
@@ -278,9 +352,24 @@ USER = st.session_state["username"]
 # Sidebar Header: User Emoji, Username and Logout button below
 st.sidebar.markdown(f"### 👤 {USER}")
 if st.sidebar.button("Logout", key="logout_btn", width='stretch'):
-    st.session_state["username"] = None
+    token_to_del = st.query_params.get("st_auth")
+    if not token_to_del and cookie_manager:
+        try:
+            token_to_del = cookie_manager.get("st_auth")
+        except Exception:
+            token_to_del = None
+    if token_to_del:
+        delete_user_session(token_to_del)
+    if "st_auth" in st.query_params:
+        del st.query_params["st_auth"]
+    if cookie_manager:
+        try:
+            cookie_manager.delete("st_auth")
+        except Exception:
+            pass
     if "usr" in st.query_params:
         del st.query_params["usr"]
+    st.session_state["username"] = None
     st.rerun()
 
 st.sidebar.divider()
@@ -314,8 +403,20 @@ STORAGE_BUCKET = database.STORAGE_BUCKET
 # Initial load
 all_mp3s, song_options_dict, song_names_list = get_song_lists()
 
-if "music_idx" not in st.session_state:
-    st.session_state.music_idx = 0
+# Find index of Perfect in song_names_list as global default
+_perfect_default_idx = 0
+for _i, _name in enumerate(song_names_list):
+    if "perfect" in _name.lower():
+        _perfect_default_idx = _i
+        break
+
+if "music_idx" not in st.session_state or not st.session_state.get("_default_player_perfect_v1"):
+    st.session_state._default_player_perfect_v1 = True
+    st.session_state.music_idx = _perfect_default_idx
+    if song_names_list:
+        st.session_state["sidebar_song_selector"] = song_names_list[_perfect_default_idx]
+        st.session_state["_mp_song_sel"] = song_names_list[_perfect_default_idx]
+
 if "music_shuffle" not in st.session_state:
     st.session_state.music_shuffle = False
 if "music_autoswitch" not in st.session_state:
@@ -332,18 +433,20 @@ _qp = st.query_params
 if _qp.get("_auto_next"):
     # Clear the query param immediately
     del _qp["_auto_next"]
-    # Advance to next song
-    if song_names_list:
-        if st.session_state.music_autoswitch:
-            st.session_state.music_playing = True
-            if st.session_state.music_shuffle:
-                _new_idx = _rand.randint(0, len(song_names_list) - 1)
-                if len(song_names_list) > 1 and _new_idx == st.session_state.music_idx:
-                    _new_idx = (_new_idx + 1) % len(song_names_list)
-                st.session_state.music_idx = _new_idx
-            else:
-                st.session_state.music_idx = (st.session_state.music_idx + 1) % len(song_names_list)
-            st.rerun()
+    # Advance to next song only if music is actively playing
+    if song_names_list and st.session_state.music_autoswitch and st.session_state.music_playing:
+        st.session_state.music_playing = True
+        st.session_state.music_play_triggered = True
+        if st.session_state.music_shuffle:
+            _new_idx = _rand.randint(0, len(song_names_list) - 1)
+            if len(song_names_list) > 1 and _new_idx == st.session_state.music_idx:
+                _new_idx = (_new_idx + 1) % len(song_names_list)
+            st.session_state.music_idx = _new_idx
+        else:
+            st.session_state.music_idx = (st.session_state.music_idx + 1) % len(song_names_list)
+        if song_names_list and st.session_state.music_idx < len(song_names_list):
+            st.session_state["sidebar_song_selector"] = song_names_list[st.session_state.music_idx]
+        st.rerun()
 
 def _render_music_player(is_mylove=False):
     """Render the sidebar music player with warm light-colored scrollable song list."""
@@ -368,6 +471,7 @@ def _render_music_player(is_mylove=False):
     def next_song():
         if not song_names_list: return
         st.session_state.music_playing = True
+        st.session_state.music_play_triggered = True
         if st.session_state.music_shuffle:
             idx = _rand.randint(0, len(song_names_list)-1)
             if len(song_names_list) > 1 and idx == st.session_state.music_idx:
@@ -375,10 +479,13 @@ def _render_music_player(is_mylove=False):
             st.session_state.music_idx = idx
         else:
             st.session_state.music_idx = (st.session_state.music_idx + 1) % len(song_names_list)
+        if song_names_list and st.session_state.music_idx < len(song_names_list):
+            st.session_state["sidebar_song_selector"] = song_names_list[st.session_state.music_idx]
 
     def prev_song():
         if not song_names_list: return
         st.session_state.music_playing = True
+        st.session_state.music_play_triggered = True
         if st.session_state.music_shuffle:
             idx = _rand.randint(0, len(song_names_list)-1)
             if len(song_names_list) > 1 and idx == st.session_state.music_idx:
@@ -386,6 +493,8 @@ def _render_music_player(is_mylove=False):
             st.session_state.music_idx = idx
         else:
             st.session_state.music_idx = (st.session_state.music_idx - 1) % len(song_names_list)
+        if song_names_list and st.session_state.music_idx < len(song_names_list):
+            st.session_state["sidebar_song_selector"] = song_names_list[st.session_state.music_idx]
 
     # Controls row
     def stop_song():
@@ -398,8 +507,8 @@ def _render_music_player(is_mylove=False):
 
     ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.sidebar.columns([1, 1, 1, 1])
     ctrl_c1.button("⏮️", on_click=prev_song, width='stretch', key="music_prev_btn", help="Previous Song")
-    # Stop button always shown; Play button hidden on MyLove Special (it autoplays)
-    if is_mylove or st.session_state.music_playing:
+    # Strict playback logic: only show Stop button when playing; show Play button when stopped
+    if st.session_state.music_playing:
         ctrl_c2.button("⏹️", on_click=stop_song, width='stretch', key="music_stop_btn", help="Stop")
     else:
         ctrl_c2.button("▶️", on_click=play_song, width='stretch', key="music_play_btn", help="Play")
@@ -427,13 +536,28 @@ def _render_music_player(is_mylove=False):
     if st.session_state.music_idx >= len(song_names_list):
         st.session_state.music_idx = 0
 
+    # Ensure Perfect is active when rendering on MyLove Special
+    if is_mylove and not st.session_state.get("_mylove_song_ready"):
+        st.session_state._mylove_song_ready = True
+        p_idx = 0
+        for i, name in enumerate(song_names_list):
+            if "perfect" in name.lower():
+                p_idx = i
+                break
+        st.session_state.music_idx = p_idx
+        if song_names_list:
+            st.session_state["sidebar_song_selector"] = song_names_list[p_idx]
+        st.session_state.music_playing = True
+        st.session_state.music_play_triggered = True
+
     # --- Song Selector Dropdown ---
     def _on_sidebar_sel_change():
         if st.session_state.sidebar_song_selector in song_names_list:
             st.session_state.music_idx = song_names_list.index(st.session_state.sidebar_song_selector)
-            st.session_state.music_playing = True
+            if st.session_state.music_playing:
+                st.session_state.music_play_triggered = True
 
-    st.sidebar.selectbox(
+    selected_song_name = st.sidebar.selectbox(
         "Select Song",
         options=song_names_list,
         index=st.session_state.music_idx,
@@ -442,7 +566,12 @@ def _render_music_player(is_mylove=False):
         label_visibility="collapsed"
     )
 
-    current_song_path = song_options_dict[song_names_list[st.session_state.music_idx]]
+    if selected_song_name in song_options_dict:
+        current_song_path = song_options_dict[selected_song_name]
+        st.session_state.music_idx = song_names_list.index(selected_song_name)
+    else:
+        current_song_path = song_options_dict[song_names_list[st.session_state.music_idx]]
+
     st.sidebar.markdown(f"""
         <div style="background-color: #161b22; padding: 10px; border-radius: 8px; border-left: 3px solid #38bdf8; margin-bottom: 10px;">
             <p style="margin: 0; font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px;">Current Track</p>
@@ -452,8 +581,8 @@ def _render_music_player(is_mylove=False):
         </div>
     """, unsafe_allow_html=True)
     
-    # Auto-play only on MyLove Special or if already started by user
-    should_autoplay = is_mylove or st.session_state.music_playing
+    # Auto-play if music_playing or on MyLove Special
+    should_autoplay = bool(st.session_state.music_playing) or is_mylove
     st.sidebar.audio(get_song_url(current_song_path), format="audio/mp3", autoplay=should_autoplay)
 
     # --- JS: actually stop or start the audio element in the browser ---
@@ -465,7 +594,8 @@ def _render_music_player(is_mylove=False):
             var attempts = 0;
             function tryStop() {
                 try {
-                    var audios = window.parent.document.querySelectorAll('audio');
+                    var doc = (window.parent && window.parent.document) ? window.parent.document : document;
+                    var audios = doc.querySelectorAll('audio');
                     audios.forEach(function(a) {
                         a.pause();
                         a.currentTime = 0;
@@ -485,64 +615,120 @@ def _render_music_player(is_mylove=False):
             var attempts = 0;
             function tryPlay() {
                 try {
-                    var sidebarAudio = window.parent.document.querySelector('[data-testid="stSidebar"] audio');
-                    var audio = sidebarAudio || window.parent.document.querySelector('audio');
-                    if (audio) { audio.play(); }
+                    var doc = (window.parent && window.parent.document) ? window.parent.document : document;
+                    var sidebarAudio = doc.querySelector('[data-testid="stSidebar"] audio');
+                    var audio = sidebarAudio || doc.querySelector('audio');
+                    if (audio) { audio.play().catch(function(){}); }
                 } catch(e) {}
-                if (++attempts < 5) setTimeout(tryPlay, 200);
+                if (++attempts < 6) setTimeout(tryPlay, 250);
             }
             tryPlay();
         })();
         </script>
         """, unsafe_allow_javascript=True)
 
-    if st.session_state.music_autoswitch:
+    if st.session_state.music_autoswitch and st.session_state.music_playing:
         st.html("""
         <script>
         (function() {
             let targetWin = window;
             try { if (window.parent && window.parent.document) targetWin = window.parent; } catch(e) {}
+            let targetDoc = targetWin.document;
+
             if (targetWin._musicAutoSwitchInterval) {
                 clearInterval(targetWin._musicAutoSwitchInterval);
             }
-            targetWin._musicAutoSwitchInterval = setInterval(() => {
+
+            function triggerNextSong() {
+                try {
+                    let sidebar = targetDoc.querySelector('[data-testid="stSidebar"]');
+                    let root = sidebar || targetDoc;
+                    let buttons = Array.from(root.querySelectorAll('button'));
+                    let nextBtn = buttons.find(function(btn) {
+                        let txt = (btn.innerText || btn.textContent || '').trim();
+                        let title = btn.getAttribute('title') || '';
+                        let aria = btn.getAttribute('aria-label') || '';
+                        return txt.includes('⏭️') || title.includes('Next') || aria.includes('Next') || aria.includes('⏭️');
+                    });
+                    if (nextBtn) {
+                        nextBtn.click();
+                        return true;
+                    } else {
+                        const url = new URL(targetWin.location.href);
+                        url.searchParams.set('_auto_next', '1');
+                        targetWin.location.href = url.toString();
+                        return false;
+                    }
+                } catch(e) {
+                    return false;
+                }
+            }
+
+            function checkAudios() {
                 try {
                     let audios = [];
-                    try { audios = Array.from(targetWin.document.querySelectorAll('audio')); } catch(e) {}
+                    try { audios = Array.from(targetDoc.querySelectorAll('[data-testid="stSidebar"] audio, audio')); } catch(e) {}
                     try {
-                        let frames = targetWin.document.querySelectorAll('iframe');
+                        let frames = targetDoc.querySelectorAll('iframe');
                         for (let i = 0; i < frames.length; i++) {
                             try { audios = audios.concat(Array.from(frames[i].contentWindow.document.querySelectorAll('audio'))); } catch(e) {}
                         }
                     } catch(e) {}
-                    
+
                     for (let a of audios) {
-                        const isDone = a.ended || (a.duration > 0 && a.currentTime >= a.duration - 0.3);
+                        let src = a.currentSrc || a.src || '';
+                        if (a._lastSrc !== src) {
+                            a._lastSrc = src;
+                            a._playStarted = false;
+                            a.dataset.autoSwitchTriggered = "";
+                        }
+                        if (a.currentTime > 1.5) {
+                            a._playStarted = true;
+                        }
+
+                        // Attach native 'ended' event listener if not already attached
+                        if (!a._autoSwitchAttached) {
+                            a._autoSwitchAttached = true;
+                            a.addEventListener('ended', function() {
+                                if (a._playStarted && a.dataset.autoSwitchTriggered !== "1") {
+                                    a.dataset.autoSwitchTriggered = "1";
+                                    triggerNextSong();
+                                }
+                            });
+                        }
+
+                        // Polling fallback: only trigger if the song actually started playing and reached end
+                        const isDone = a._playStarted && !a.paused && a.duration > 3 && a.currentTime >= a.duration - 0.4;
                         if (isDone && a.dataset.autoSwitchTriggered !== "1") {
                             a.dataset.autoSwitchTriggered = "1";
-                            
-                            // Try clicking the Next button (cleanest approach)
-                            let b = Array.from(targetWin.document.querySelectorAll('button')).find(btn => 
-                                btn.title === 'Next Song' || btn.title === 'Next' || 
-                                (btn.getAttribute('aria-label') && (btn.getAttribute('aria-label') === 'Next Song' || btn.getAttribute('aria-label') === 'Next'))
-                            );
-                            if (b) {
-                                b.click();
-                            } else {
-                                // Fallback: Navigate with query param to trigger Streamlit rerun
-                                const url = new URL(targetWin.location.href);
-                                url.searchParams.set('_auto_next', '1');
-                                targetWin.location.href = url.toString();
-                            }
-                            return; // Stop processing
+                            triggerNextSong();
+                            return;
                         }
-                        // Reset trigger when not near end
+                        // Reset trigger when position rewinds
                         if (a.duration > 0 && a.currentTime < a.duration - 2) {
                             a.dataset.autoSwitchTriggered = "";
                         }
                     }
                 } catch(e) {}
-            }, 800);
+            }
+
+            targetWin._musicAutoSwitchInterval = setInterval(checkAudios, 800);
+            checkAudios();
+        })();
+        </script>
+        """, unsafe_allow_javascript=True)
+    else:
+        st.html("""
+        <script>
+        (function() {
+            try {
+                let targetWin = window;
+                if (window.parent && window.parent.document) targetWin = window.parent;
+                if (targetWin._musicAutoSwitchInterval) {
+                    clearInterval(targetWin._musicAutoSwitchInterval);
+                    targetWin._musicAutoSwitchInterval = null;
+                }
+            } catch(e) {}
         })();
         </script>
         """, unsafe_allow_javascript=True)
@@ -553,23 +739,32 @@ def _render_music_player(is_mylove=False):
             st.session_state["_jump_to_media_player"] = True
             st.rerun()
 
-    # --- Reset to default song for MyLove Special ---
-    if is_mylove:
-        _default_song = USER_CONFIG.get("mylove_default_song", "Perfect.mp3")
-        _default_song_clean = clean_song_name(_default_song) if _default_song else "Perfect 💍"
-        if st.sidebar.button(f"🔄 Reset to Default ({_default_song_clean})", key="music_reset_mylove_btn", width='stretch'):
-            st.session_state.music_playing = True
+    # --- Reset to default song (Perfect) ---
+    _default_song = USER_CONFIG.get("mylove_default_song", "Perfect.mp3") if is_mylove else "Perfect.mp3"
+    _default_song = _default_song or "Perfect.mp3"
+    _default_song_clean = clean_song_name(_default_song) if _default_song else "Perfect 💍"
+    if st.sidebar.button(f"🔄 Reset to Default ({_default_song_clean})", key="music_reset_default_btn", width='stretch'):
+        st.session_state.music_playing = False
+        st.session_state.music_stop_triggered = True
+        _found_reset = False
+        _target_base = os.path.basename(_default_song).replace('.mp3', '').lower()
+        for i, name in enumerate(song_names_list):
+            song_path = song_options_dict.get(name, '')
+            if _target_base in name.lower() or os.path.basename(_default_song) == os.path.basename(song_path):
+                st.session_state.music_idx = i
+                st.session_state["sidebar_song_selector"] = name
+                st.session_state["_mp_song_sel"] = name
+                _found_reset = True
+                break
+        if not _found_reset:
+            # Fallback to Perfect if configured song not found
             for i, name in enumerate(song_names_list):
-                if _default_song and _default_song.replace('.mp3', '').lower() in name.lower():
+                if "perfect" in name.lower():
                     st.session_state.music_idx = i
+                    st.session_state["sidebar_song_selector"] = name
+                    st.session_state["_mp_song_sel"] = name
                     break
-            else:
-                # Fallback to Perfect if configured song not found
-                for i, name in enumerate(song_names_list):
-                    if "perfect" in name.lower():
-                        st.session_state.music_idx = i
-                        break
-            st.rerun()
+        st.rerun()
 
     st.sidebar.markdown('<div id="sidebar-music-end-marker"></div>', unsafe_allow_html=True)
     st.sidebar.divider()
@@ -648,23 +843,36 @@ menu = st.session_state.menu
 if st.session_state.get("_prev_menu") != menu:
     st.html("<script>window.parent.window.scrollTo(0,0);</script>", unsafe_allow_javascript=True)
 
-# Auto-select configured default song when first entering MyLove Special
+# Auto-select configured default song and start playback when entering MyLove Special
 if menu == "MyLove Special":
     if st.session_state.get("_prev_menu") != "MyLove Special":
-        _default_song = USER_CONFIG.get("mylove_default_song", "Perfect.mp3")
+        st.session_state.music_playing = True
+        st.session_state.music_play_triggered = True
+        _default_song = USER_CONFIG.get("mylove_default_song", "Perfect.mp3") or "Perfect.mp3"
         _found_default = False
+        _target_idx = 0
         if _default_song:
-            _default_base = _default_song.replace('.mp3', '').lower()
+            _target_base = os.path.basename(_default_song).replace('.mp3', '').lower()
             for i, name in enumerate(song_names_list):
-                if _default_base in name.lower():
-                    st.session_state.music_idx = i
+                song_path = song_options_dict.get(name, '')
+                if _target_base in name.lower() or os.path.basename(_default_song) == os.path.basename(song_path):
+                    _target_idx = i
                     _found_default = True
                     break
         if not _found_default:
             for i, name in enumerate(song_names_list):
                 if "perfect" in name.lower():
-                    st.session_state.music_idx = i
+                    _target_idx = i
+                    _found_default = True
                     break
+        st.session_state.music_idx = _target_idx
+        if song_names_list and _target_idx < len(song_names_list):
+            st.session_state["sidebar_song_selector"] = song_names_list[_target_idx]
+elif st.session_state.get("_prev_menu") == "MyLove Special" and menu != "MyLove Special":
+    # Leaving MyLove Special: stop playback so song never plays itself on landing page
+    st.session_state.music_playing = False
+    st.session_state.music_stop_triggered = True
+
 st.session_state["_prev_menu"] = menu
 
 # --- Render sidebar music player ---

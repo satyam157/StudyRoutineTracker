@@ -1,0 +1,18 @@
+[server]
+# Timeout in seconds for disconnected sessions (3 days = 259200 seconds)
+# Prevents session reset if tab is closed, computer sleeps, or connection drops
+disconnectedSessionTTL = 259200
+
+# Ping interval to keep websocket connection alive through idle periods and proxies
+websocketPingInterval = 30
+
+# Maximum message and upload size
+maxMessageSize = 200
+maxUploadSize = 200
+
+# Security and CORS
+enableCORS = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

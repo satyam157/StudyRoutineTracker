@@ -312,6 +312,10 @@ if c is not None:
         except Exception:
             pass
         try:
+            c.execute("ALTER TABLE targets ADD COLUMN start_time TEXT DEFAULT NULL")
+        except Exception:
+            pass
+        try:
             c.execute("ALTER TABLE custom_boxes ADD COLUMN tracking_type TEXT DEFAULT 'Hours'")
         except Exception:
             pass
@@ -438,6 +442,21 @@ if c is not None:
         """)
         try:
             c.execute("ALTER TABLE user_defaults ENABLE ROW LEVEL SECURITY")
+        except Exception:
+            pass
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL
+        )
+        """)
+        try:
+            c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_username ON user_sessions(username)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)")
         except Exception:
             pass
 
@@ -591,3 +610,87 @@ def set_allowed_recipients(sender, recipients):
         return True
     except:
         return False
+
+
+def create_user_session(username, duration_days=3):
+    """Create a persistent user session valid for duration_days (default 3 days)."""
+    import secrets
+    token = secrets.token_urlsafe(32)
+    now = get_ist_now()
+    expires_at = now + timedelta(days=duration_days)
+    try:
+        tmp_conn, tmp_c = get_fresh_cursor()
+        tmp_c.execute(
+            """
+            INSERT INTO user_sessions (token, username, created_at, last_active, expires_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (token, username, now, now, expires_at)
+        )
+        tmp_conn.commit()
+        tmp_c.close()
+        tmp_conn.close()
+        return token
+    except Exception as e:
+        print(f"Error creating user session: {e}")
+        return None
+
+
+def validate_user_session(token, extend_days=3):
+    """
+    Validate a session token. If valid, update last_active and extend expires_at by extend_days.
+    Returns username if valid, None otherwise.
+    """
+    if not token or not isinstance(token, str):
+        return None
+    try:
+        now = get_ist_now()
+        tmp_conn, tmp_c = get_fresh_cursor()
+        tmp_c.execute(
+            "SELECT username, expires_at FROM user_sessions WHERE token = %s",
+            (token.strip(),)
+        )
+        row = tmp_c.fetchone()
+        if not row:
+            tmp_c.close()
+            tmp_conn.close()
+            return None
+        
+        username, expires_at = row
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+            
+        if expires_at > now:
+            new_expires_at = now + timedelta(days=extend_days)
+            tmp_c.execute(
+                "UPDATE user_sessions SET last_active = %s, expires_at = %s WHERE token = %s",
+                (now, new_expires_at, token.strip())
+            )
+            tmp_conn.commit()
+            tmp_c.close()
+            tmp_conn.close()
+            return username
+        else:
+            tmp_c.execute("DELETE FROM user_sessions WHERE token = %s", (token.strip(),))
+            tmp_conn.commit()
+            tmp_c.close()
+            tmp_conn.close()
+            return None
+    except Exception as e:
+        print(f"Error validating user session: {e}")
+        return None
+
+
+def delete_user_session(token):
+    """Delete a user session on logout."""
+    if not token:
+        return
+    try:
+        tmp_conn, tmp_c = get_fresh_cursor()
+        tmp_c.execute("DELETE FROM user_sessions WHERE token = %s", (token.strip(),))
+        tmp_conn.commit()
+        tmp_c.close()
+        tmp_conn.close()
+    except Exception as e:
+        print(f"Error deleting user session: {e}")
+

@@ -885,7 +885,7 @@ def render(USER, USER_CONFIG):
                                          title=f"Stacked Time per Day — {month_str}")
                     st.plotly_chart(fig_mt, width='stretch', key=f"monthly_stacked_{month_str}")
     
-                study_m = prod_m[prod_m['type'].isin(['Study', 'Revision'])]
+                study_m = prod_m[prod_m['type'].isin(['Study', 'Study during trip', 'Revision'])]
                 if not study_m.empty:
                     st.markdown("**📚 Subject-wise Study & Revision Hours**")
                     subj_m_df = study_m.groupby('subject')['duration'].sum().sort_values(ascending=False).reset_index()
@@ -1240,7 +1240,7 @@ def render(USER, USER_CONFIG):
                                       xaxis_title="Month", yaxis_title="Hours")
                 st.plotly_chart(fig_yl, width='stretch', key=f"yearly_trend_{int(sel_year_y)}")
     
-                study_y = prod_y[prod_y['type'].isin(['Study', 'Revision'])]
+                study_y = prod_y[prod_y['type'].isin(['Study', 'Study during trip', 'Revision'])]
                 if not study_y.empty:
                     st.markdown("**📚 Yearly Subject-wise Study & Revision Hours**")
                     subj_y_df = study_y.groupby('subject')['duration'].sum().sort_values(ascending=False).reset_index()

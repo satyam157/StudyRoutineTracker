@@ -87,38 +87,12 @@ def render(USER, USER_CONFIG):
                 for sender_name, notes in activity_grouped.items():
                     with st.expander(f"📝 {sender_name} — {len(notes)} event{'s' if len(notes) != 1 else ''}", expanded=False):
                         for n_id, msg, ts, sender, is_hidden in notes:
-                            st.markdown(f"""
-                            <div style="
-                                background: linear-gradient(135deg, #f0f4ff 0%, #ffffff 100%);
-                                padding: 16px;
-                                border-radius: 16px;
-                                margin-bottom: 5px;
-                                border-left: 4px solid #6366f1;
-                                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
-                            ">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-size: 13px; font-weight: 600; color: #6366f1;">📝 {sender}</span>
-                                    <span style="font-size: 11px; color: #999;">⏰ {ts}</span>
-                                </div>
-                                <div style="font-size: 15px; color: #333; line-height: 1.5;">
-                                    {msg}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            if _activity_can_delete:
-                                if st.checkbox(f"🗑️ Delete #{n_id}?", key=f"act_del_{n_id}"):
-                                    if st.button("✅ Confirm Delete", key=f"act_y_{n_id}", type="primary"):
-                                        proposal.delete_notification(n_id)
-                                        st.rerun()
-                            
-                            proposal.mark_notification_read(n_id)
+                            proposal._render_note_card(n_id, msg, ts, sender, "📝", _activity_can_delete, can_hide=False, is_hidden=is_hidden, key_prefix="act_")
                 
                 # Clear all activity
                 if _activity_can_delete:
                     st.divider()
                     if st.button("🗑️ Clear All Note Activity", width='stretch', key="clear_note_activity"):
-                        import database
                         get_fresh_cursor = database.get_fresh_cursor
                         tmp_conn, tmp_c = get_fresh_cursor()
                         if tmp_c:

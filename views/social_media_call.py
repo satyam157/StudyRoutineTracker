@@ -11,6 +11,13 @@ def render(USER, USER_CONFIG):
     conn = database.conn
     c = database.c
     st.title("📱 Social Media & Calls Calendar")
+    st.markdown("""
+    <div style="display: flex; gap: 10px; margin-top: -8px; margin-bottom: 16px; flex-wrap: wrap; font-size: 12.5px;">
+        <span style="background: rgba(249, 115, 22, 0.15); border: 1px solid #f97316; color: #fdba74; padding: 4px 10px; border-radius: 6px; font-weight: 600;">📱 Social Media</span>
+        <span style="background: rgba(129, 140, 248, 0.15); border: 1px solid #818cf8; color: #c7d2fe; padding: 4px 10px; border-radius: 6px; font-weight: 600;">📞 TalkOnCall</span>
+        <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 4px 10px; border-radius: 6px; font-weight: 600;">⚠️ Overthinking (Waste)</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     import calendar as calmod
 
@@ -25,16 +32,21 @@ def render(USER, USER_CONFIG):
     # ── Activity types tracked on this calendar ──────────────────────────────
     _SM_TYPES    = ["Social Media"]
     _CALL_TYPES  = ["TalkOnCall"]
-    _ALL_TYPES   = _SM_TYPES + _CALL_TYPES
+    _OT_TYPES    = ["Overthinking", "⚠️ Overthinking"]
+    _ALL_TYPES   = _SM_TYPES + _CALL_TYPES + _OT_TYPES
 
     # Color per type for calendar cells
     _TYPE_COLOR = {
         "Social Media": "#f97316",   # orange
         "TalkOnCall":   "#818cf8",   # indigo
+        "Overthinking": "#ef4444",   # danger red
+        "⚠️ Overthinking": "#ef4444",
     }
     _TYPE_ICON = {
         "Social Media": "📱",
         "TalkOnCall":   "📞",
+        "Overthinking": "⚠️",
+        "⚠️ Overthinking": "⚠️",
     }
 
     df_all = get_activities_df(USER)
@@ -204,11 +216,12 @@ def render(USER, USER_CONFIG):
 
         sm_hrs   = hours_map.get('Social Media', 0.0)
         call_hrs = hours_map.get('TalkOnCall', 0.0)
-        total_waste = sm_hrs + call_hrs
+        ot_hrs   = hours_map.get('Overthinking', 0.0) + hours_map.get('⚠️ Overthinking', 0.0)
+        total_waste = sm_hrs + call_hrs + ot_hrs
         study_hrs = daily_prod.get(date_str, 0.0)
         
-        # Golden day: SM ≤ 1h AND Calls ≤ 2h (even if 0)
-        is_golden = (sm_hrs <= 1.0) and (call_hrs <= 2.0) and not is_future
+        # Golden day: SM ≤ 1h AND Calls ≤ 2h AND Overthinking ≤ 0.5h (even if 0)
+        is_golden = (sm_hrs <= 1.0) and (call_hrs <= 2.0) and (ot_hrs <= 0.5) and not is_future
 
         cell_cls = "smc-cal-cell"
         if is_golden:  cell_cls += " golden-day"
@@ -250,11 +263,28 @@ def render(USER, USER_CONFIG):
                 desc   = act['description']
                 
                 # Solid colors for chips to stand out against colored backgrounds
-                _TYPE_BG = {"Social Media": "#1a1a1a", "TalkOnCall": "#1a1a1a"}
-                _TYPE_TEXT = {"Social Media": "#ffffff", "TalkOnCall": "#ffffff"}
+                _TYPE_BG = {
+                    "Social Media": "#1a1a1a",
+                    "TalkOnCall": "#1a1a1a",
+                    "Overthinking": "#3b0707",
+                    "⚠️ Overthinking": "#3b0707",
+                }
+                _TYPE_TEXT = {
+                    "Social Media": "#ffffff",
+                    "TalkOnCall": "#ffffff",
+                    "Overthinking": "#fca5a5",
+                    "⚠️ Overthinking": "#fca5a5",
+                }
+                _TYPE_BORDER = {
+                    "Social Media": "1px solid rgba(255,255,255,0.1)",
+                    "TalkOnCall": "1px solid rgba(255,255,255,0.1)",
+                    "Overthinking": "1px solid #ef4444",
+                    "⚠️ Overthinking": "1px solid #ef4444",
+                }
                 
                 bg = _TYPE_BG.get(t, '#334155')
                 fg = _TYPE_TEXT.get(t, '#ffffff')
+                border_style = _TYPE_BORDER.get(t, 'none')
                 icon = _TYPE_ICON.get(t, '•')
 
                 parts = []
@@ -266,7 +296,7 @@ def render(USER, USER_CONFIG):
 
                 html += (
                     f"<div class='smc-act-chip' "
-                    f"style='background: {bg}; color: {fg}; box-shadow: 0 1px 3px rgba(0,0,0,0.3);' title='{tooltip}'>"
+                    f"style='background: {bg}; color: {fg}; border: {border_style}; box-shadow: 0 1px 3px rgba(0,0,0,0.3);' title='{tooltip}'>"
                     f"{chip_label}"
                 )
                 if desc:
@@ -291,17 +321,19 @@ def render(USER, USER_CONFIG):
     st.markdown("---")
     st.markdown(f"### 📊 {month_name_str} {int(selected_year)} — Summary")
 
-    sm_total  = month_smc[month_smc['type'] == 'Social Media']['duration'].sum() if not month_smc.empty else 0.0
+    sm_total   = month_smc[month_smc['type'] == 'Social Media']['duration'].sum() if not month_smc.empty else 0.0
     call_total = month_smc[month_smc['type'] == 'TalkOnCall']['duration'].sum() if not month_smc.empty else 0.0
-    combined  = sm_total + call_total
+    ot_total   = month_smc[month_smc['type'].isin(_OT_TYPES)]['duration'].sum() if not month_smc.empty else 0.0
+    combined   = sm_total + call_total + ot_total
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("📱 Social Media", format_duration(sm_total))
     c2.metric("📞 Calls (TalkOnCall)", format_duration(call_total))
-    c3.metric("🕐 Total This Month", format_duration(combined))
+    c3.metric("⚠️ Overthinking", format_duration(ot_total))
+    c4.metric("🕐 Total Waste", format_duration(combined))
 
     if not smc_df.empty:
-        st.markdown("#### 🔍 Breakdown by Platform / Person")
+        st.markdown("#### 🔍 Breakdown by Platform / Person / Trigger")
         
         b_c1, b_c2 = st.columns(2)
         with b_c1:
@@ -320,8 +352,9 @@ def render(USER, USER_CONFIG):
                 .sort_values('duration', ascending=False)
             )
             breakdown['duration_fmt'] = breakdown['duration'].apply(format_duration)
-            breakdown.rename(columns={'type': 'Activity', 'subject': 'Platform / Person', 'duration_fmt': 'Time'}, inplace=True)
-            st.dataframe(breakdown[['Activity', 'Platform / Person', 'Time']], hide_index=True, width='stretch')
+            breakdown['type'] = breakdown['type'].apply(lambda x: f"⚠️ {x}" if "Overthinking" in x and "⚠️" not in x else x)
+            breakdown.rename(columns={'type': 'Activity', 'subject': 'Platform / Person / Trigger', 'duration_fmt': 'Time'}, inplace=True)
+            st.dataframe(breakdown[['Activity', 'Platform / Person / Trigger', 'Time']], hide_index=True, width='stretch')
         else:
             st.info("No breakdown data found for the selected month.")
 
@@ -344,11 +377,12 @@ def render(USER, USER_CONFIG):
             log_df = log_df.sort_values(by=['date', 'start_time'], na_position='last')
             
             display_df = log_df[['date', 'type', 'subject', 'chapter', 'Duration', 'description']].copy()
+            display_df['type'] = display_df['type'].apply(lambda x: f"⚠️ {x}" if "Overthinking" in x and "⚠️" not in x else x)
             display_df.rename(columns={
                 'date': 'Date',
                 'type': 'Activity',
-                'subject': 'Platform / Person',
-                'chapter': 'Note',
+                'subject': 'Platform / Person / Trigger',
+                'chapter': 'Note / Detail',
                 'description': 'Description'
             }, inplace=True)
             
@@ -356,5 +390,5 @@ def render(USER, USER_CONFIG):
         else:
             st.info(f"No entries found for the selected month.")
     else:
-        st.info("No Social Media or Call entries recorded yet.")
+        st.info("No Social Media, Call, or Overthinking entries recorded yet.")
 

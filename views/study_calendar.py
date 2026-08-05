@@ -25,7 +25,7 @@ def render(USER, USER_CONFIG):
         selected_month = st.number_input("Month", value=today.month, min_value=1, max_value=12, key="sc_cal_mo", step=1)
     
     # Activities to show on Study Calendar
-    _SC_TYPES = ['Study', 'Test', 'Coaching', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Form Fillup', 'Strategy Planning', 'Resource Collection']
+    _SC_TYPES = ['Study', 'Study during trip', 'Test', 'Coaching', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Form Fillup', 'Strategy Planning', 'Resource Collection']
     # Activities whose text should render in golden
     _SC_GOLDEN_TEXT = ['Form Fillup', 'Strategy Planning', 'Resource Collection']
     
@@ -57,7 +57,7 @@ def render(USER, USER_CONFIG):
                 dur = float(r.get('duration', 0) or 0)
                 amt = float(r.get('amount', 0) or 0)
                 
-                if t not in ['Study', 'Revision', 'Coaching', 'Form Fillup', 'Strategy Planning', 'Resource Collection']:
+                if t not in ['Study', 'Study during trip', 'Revision', 'Coaching', 'Form Fillup', 'Strategy Planning', 'Resource Collection']:
                     k = (t, s, c, _)
                 else:
                     k = (t, s, c)
@@ -403,8 +403,9 @@ def render(USER, USER_CONFIG):
                             _yc, _nc = st.columns([1, 1])
                             with _yc:
                                 if st.button("✅ Yes", key=f"yes_sc_{_rid}", width='stretch'):
-                                    c.execute("DELETE FROM activities WHERE id=%s", (_rid,))
+                                    c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (_rid, USER))
                                     conn.commit()
+                                    invalidate_activities_cache(USER)
                                     st.toast(f"🗑️ Activity deleted", icon="🗑️")
                                     st.session_state[f"confirm_sc_{_rid}"] = False
                                     st.rerun()

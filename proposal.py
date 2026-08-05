@@ -1,6 +1,7 @@
 import streamlit as st
 import base64
 import random
+import html
 
 # ------------------ DATABASE ------------------
 def log_love_acceptance(username):
@@ -160,49 +161,38 @@ def get_all_love_notifications(recipient):
 
 # ------------------ ADMIN NOTIFICATIONS UI ------------------
 
-def _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=False, is_hidden=False):
-    """Render a single notification card with optional delete and hide controls."""
-    st.markdown(f"""
-    <div style="
-        background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
-        padding: 20px;
-        border-radius: 20px;
-        margin-bottom: 5px;
-        border-left: 5px solid #ff4b4b;
-        box-shadow: 0 10px 20px rgba(255, 75, 75, 0.05);
-    ">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 14px; font-weight: 600; color: #ff4b4b;">{icon} From: {sender}</span>
-            <span style="font-size: 12px; color: #999;">⏰ {ts}</span>
-        </div>
-        <div style="font-size: 18px; color: #333; line-height: 1.5; font-style: italic;">
-            "{msg}"
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+def _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=False, is_hidden=False, key_prefix=""):
+    """Render a single notification card with optional delete and side lock emoji to hide/unhide."""
+    safe_msg = html.escape(str(msg)).replace("\n", "<br>")
+    safe_sender = html.escape(str(sender))
+    safe_ts = html.escape(str(ts))
+    border_color = "#ff4b4b" if icon in ["💖", "💌", "❤️"] else ("#6366f1" if icon == "📝" else ("#f59e0b" if icon == "🔔" else "#ef4444"))
 
-    col_del, col_hide = st.columns(2)
-    with col_del:
-        if can_delete:
-            if st.checkbox(f"🗑️ Delete Message #{n_id}?", key=f"chk_del_{n_id}"):
-                st.warning("Are you sure? This cannot be undone.")
-                c1, c2 = st.columns(2)
-                if c1.button("✅ Yes, Delete", key=f"y_del_{n_id}", type="primary"):
-                    delete_notification(n_id)
-                    st.rerun()
-                if c2.button("❌ No, Keep It", key=f"n_del_{n_id}"):
-                    st.rerun()
-                    
-    with col_hide:
-        if can_hide:
-            if is_hidden:
-                if st.button("👁️ Unhide Message", key=f"unhide_{n_id}"):
-                    toggle_notification_visibility(n_id, False)
-                    st.rerun()
-            else:
-                if st.button("🔒 Hide Message", key=f"hide_{n_id}"):
-                    toggle_notification_visibility(n_id, True)
-                    st.rerun()
+    card_html = f"""<div style="background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%); padding: 16px 20px; border-radius: 18px; margin-bottom: 6px; border-left: 5px solid {border_color}; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><span style="font-size: 13px; font-weight: 600; color: {border_color};">{icon} From: {safe_sender}</span><span style="font-size: 11px; color: #94a3b8;">⏰ {safe_ts}</span></div><div style="font-size: 16px; color: #1e293b; line-height: 1.5; font-style: italic;">"{safe_msg}"</div></div>"""
+
+    if can_hide:
+        col_card, col_lock = st.columns([11, 1])
+        with col_card:
+            st.html(card_html)
+        with col_lock:
+            st.write("")
+            btn_icon = "🔓" if is_hidden else "🔒"
+            btn_help = "Unhide message" if is_hidden else "Hide message"
+            if st.button(btn_icon, key=f"{key_prefix}lock_{n_id}", help=btn_help):
+                toggle_notification_visibility(n_id, not is_hidden)
+                st.rerun()
+    else:
+        st.html(card_html)
+
+    if can_delete:
+        if st.checkbox(f"🗑️ Delete Message #{n_id}?", key=f"{key_prefix}chk_del_{n_id}"):
+            st.warning("Are you sure? This cannot be undone.")
+            c1, c2 = st.columns(2)
+            if c1.button("✅ Yes, Delete", key=f"{key_prefix}y_del_{n_id}", type="primary"):
+                delete_notification(n_id)
+                st.rerun()
+            if c2.button("❌ No, Keep It", key=f"{key_prefix}n_del_{n_id}"):
+                st.rerun()
 
     mark_notification_read(n_id)
 
@@ -224,7 +214,7 @@ def show_admin_notifications(recipient='admin', mode='all'):
     # Filter based on mode
     filtered_notifs = []
     for n in notifs:
-        msg = n[1] # row is (id, message, timestamp, username)
+        msg = n[1] # row is (id, message, timestamp, username, is_hidden)
         is_system = any(prefix in msg for prefix in ["🔔", "💔", "💖 YES!", "📝"])
         
         if mode == 'system' and is_system:
@@ -270,44 +260,27 @@ def show_admin_notifications(recipient='admin', mode='all'):
                     grouped_visible[sender] = []
                 grouped_visible[sender].append((n_id, msg, ts, sender, is_hidden))
 
-            st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-                padding: 14px 20px; border-radius: 14px; border: 1px solid #334155;
-                margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;
-            ">
-                <span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">
-                    📬 {len(visible_notes)} Note{'s' if len(visible_notes) != 1 else ''} from {len(grouped_visible)} sender{'s' if len(grouped_visible) != 1 else ''}
-                </span>
-                <span style="color: #64748b; font-size: 12px;">Grouped by user</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.html(f"""<div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 14px 20px; border-radius: 14px; border: 1px solid #334155; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;"><span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">📬 {len(visible_notes)} Note{'s' if len(visible_notes) != 1 else ''} from {len(grouped_visible)} sender{'s' if len(grouped_visible) != 1 else ''}</span><span style="color: #64748b; font-size: 12px;">Grouped by user</span></div>""")
 
             for sender_name, notes in grouped_visible.items():
                 unread_count = len(notes)
                 with st.expander(f"💌 {sender_name} — {unread_count} note{'s' if unread_count != 1 else ''}", expanded=False):
                     for n_id, msg, ts, sender, is_hidden in notes:
                         icon = _get_note_icon(msg)
-                        _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=False)
+                        _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=False, key_prefix=f"vis_{recipient}_")
         else:
             st.info("No visible notes right now.")
 
-        # ── Display Hidden Notes Section ──
+        # ── Display Hidden Notes Section (Discreet Toggle at Bottom) ──
         if can_hide and hidden_notes:
-            st.divider()
             reveal_key = f"_reveal_hidden_{recipient}"
             if reveal_key not in st.session_state:
                 st.session_state[reveal_key] = False
             
-            if not st.session_state[reveal_key]:
-                if st.button("👁️ Reveal Hidden Messages", width="stretch", key="btn_reveal_hidden"):
-                    st.session_state[reveal_key] = True
-                    st.rerun()
-            else:
-                if st.button("🔒 Hide Messages Again", width="stretch", key="btn_hide_again"):
-                    st.session_state[reveal_key] = False
-                    st.rerun()
-                
+            is_revealed = st.session_state[reveal_key]
+
+            if is_revealed:
+                st.markdown("---")
                 st.markdown("### 🔒 Hidden Messages")
                 grouped_hidden = OrderedDict()
                 for n_id, msg, ts, sender, is_hidden in hidden_notes:
@@ -316,11 +289,75 @@ def show_admin_notifications(recipient='admin', mode='all'):
                     grouped_hidden[sender].append((n_id, msg, ts, sender, is_hidden))
 
                 for sender_name, notes in grouped_hidden.items():
-                    unread_count = len(notes)
-                    with st.expander(f"🔒 {sender_name} — {unread_count} hidden note{'s' if unread_count != 1 else ''}", expanded=True):
+                    with st.expander(f"🔒 {sender_name}", expanded=True):
                         for n_id, msg, ts, sender, is_hidden in notes:
                             icon = _get_note_icon(msg)
-                            _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=True)
+                            _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=can_hide, is_hidden=True, key_prefix=f"hid_{recipient}_")
+
+            # Secret minimal toggle at the very bottom of the page (unrecognizable as a button)
+            st.write("")
+            _, col_secret = st.columns([22, 1])
+            with col_secret:
+                st.html("""
+                <div id="secret-lock-anchor"></div>
+                <style>
+                div[data-testid="stHtml"]:has(#secret-lock-anchor) + div[data-testid="stButton"] button,
+                div[data-testid="stHtml"]:has(#secret-lock-anchor) + div[data-testid="stButton"] button:focus,
+                button.secret-lock-btn-custom {
+                    background: transparent !important;
+                    background-color: transparent !important;
+                    border: none !important;
+                    border-color: transparent !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    min-height: 16px !important;
+                    height: 16px !important;
+                    min-width: 16px !important;
+                    width: 16px !important;
+                    font-size: 11px !important;
+                    line-height: 1 !important;
+                    opacity: 0.18 !important;
+                    cursor: pointer !important;
+                    transition: opacity 0.3s ease !important;
+                }
+                div[data-testid="stHtml"]:has(#secret-lock-anchor) + div[data-testid="stButton"] button:hover,
+                button.secret-lock-btn-custom:hover {
+                    opacity: 0.85 !important;
+                }
+                div[data-testid="stHtml"]:has(#secret-lock-anchor) + div[data-testid="stButton"] button p,
+                button.secret-lock-btn-custom p {
+                    font-size: 11px !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                </style>
+                <script>
+                (function() {
+                    function applyStyle() {
+                        const doc = (window.parent && window.parent.document) ? window.parent.document : document;
+                        const anchor = doc.getElementById('secret-lock-anchor');
+                        if (!anchor) return;
+                        const htmlDiv = anchor.closest('[data-testid="stHtml"]');
+                        if (!htmlDiv) return;
+                        const nextDiv = htmlDiv.nextElementSibling;
+                        if (!nextDiv) return;
+                        const btn = nextDiv.querySelector('button');
+                        if (btn && !btn.classList.contains('secret-lock-btn-custom')) {
+                            btn.classList.add('secret-lock-btn-custom');
+                        }
+                    }
+                    applyStyle();
+                    setTimeout(applyStyle, 100);
+                    setTimeout(applyStyle, 300);
+                })();
+                </script>
+                """)
+                btn_icon = "🔓" if is_revealed else "🔒"
+                if st.button(btn_icon, key=f"btn_secret_lock_{recipient}", help=""):
+                    st.session_state[reveal_key] = not is_revealed
+                    st.rerun()
 
     else:
         # ── SYSTEM / ALL MODE: Group by sender ──
@@ -331,25 +368,14 @@ def show_admin_notifications(recipient='admin', mode='all'):
                 grouped[sender] = []
             grouped[sender].append((n_id, msg, ts, sender, is_hidden))
 
-        st.markdown(f"""
-        <div style="
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            padding: 14px 20px; border-radius: 14px; border: 1px solid #334155;
-            margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;
-        ">
-            <span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">
-                🔔 {len(filtered_notifs)} Alert{'s' if len(filtered_notifs) != 1 else ''} related to {len(grouped)} user{'s' if len(grouped) != 1 else ''}
-            </span>
-            <span style="color: #64748b; font-size: 12px;">Grouped by user</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.html(f"""<div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 14px 20px; border-radius: 14px; border: 1px solid #334155; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;"><span style="color: #e2e8f0; font-size: 15px; font-weight: 600;">🔔 {len(filtered_notifs)} Alert{'s' if len(filtered_notifs) != 1 else ''} related to {len(grouped)} user{'s' if len(grouped) != 1 else ''}</span><span style="color: #64748b; font-size: 12px;">Grouped by user</span></div>""")
 
         for sender_name, notes in grouped.items():
             unread_count = len(notes)
             with st.expander(f"🔔 {sender_name} — {unread_count} alert{'s' if unread_count != 1 else ''}", expanded=False):
                 for n_id, msg, ts, sender, is_hidden in notes:
                     icon = _get_note_icon(msg)
-                    _render_note_card(n_id, msg, ts, sender, icon, can_delete)
+                    _render_note_card(n_id, msg, ts, sender, icon, can_delete, can_hide=False, is_hidden=is_hidden, key_prefix=f"{mode}_{recipient}_")
 
     # Clear all button - only show if permitted
     if can_delete:

@@ -59,11 +59,22 @@ def render(USER, USER_CONFIG):
                 # --- MyLove Special default song selector ---
                 if v1:  # Only show if MyLove Special page is enabled
                     _current_default = row.get('mylove_default_song', 'Perfect.mp3') or 'Perfect.mp3'
-                    _audio_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
-                    _mp3_files = [f for f in os.listdir(".") if f.lower().endswith(_audio_exts)]
-                    _mp3_files.sort()
-                    _default_idx = _mp3_files.index(_current_default) if _current_default in _mp3_files else 0
-                    v9 = st.selectbox(
+                    _mp3_files = get_all_songs()
+                    if not _mp3_files:
+                        _mp3_files = ["Perfect.mp3"]
+
+                    _default_idx = 0
+                    for _idx, _f in enumerate(_mp3_files):
+                        if (
+                            _f == _current_default
+                            or os.path.basename(_f) == os.path.basename(_current_default)
+                            or os.path.basename(_f) == _current_default
+                            or (_current_default and _current_default.replace('.mp3', '').lower() in os.path.basename(_f).replace('.mp3', '').lower())
+                        ):
+                            _default_idx = _idx
+                            break
+
+                    _v9_sel = st.selectbox(
                         f"🎵 Default MyLove Song for {row['username']}",
                         options=_mp3_files,
                         index=_default_idx,
@@ -71,6 +82,7 @@ def render(USER, USER_CONFIG):
                         key=f"mlsong_{row['username']}",
                         help="The song that auto-plays when this user opens MyLove Special"
                     )
+                    v9 = os.path.basename(_v9_sel) if _v9_sel else (_current_default or "Perfect.mp3")
                 else:
                     v9 = row.get('mylove_default_song', 'Perfect.mp3') or 'Perfect.mp3'
     

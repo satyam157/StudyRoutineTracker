@@ -17,10 +17,20 @@ talkoncall_withwhom = ["Bestie", "Parent", "Friend", "Other"]
 content_type = ["Stories/Chat"]
 food_sources = ["Swiggy","Zomato","Outside"]
 transport_services = ["Uber","Ola","Rapido"]
+overthinking_triggers = [
+    "Career & Exam Stress",
+    "Future Anxiety",
+    "Past Regrets & Guilt",
+    "Relationships / Family",
+    "Comparison & Self-Doubt",
+    "Health & Loneliness",
+    "General / Negative Thoughts",
+    "Other"
+]
 
 test_types = ["Mock Test","Sectional","PYQ", "D-Day Exam"]
 
-PRODUCTIVE_TYPES = ["Study","Revision","Test", "Book Reading", "Answer Writing", "Practice"]
+PRODUCTIVE_TYPES = ["Study", "Study during trip", "Revision","Test", "Book Reading", "Answer Writing", "Practice"]
 ESSENTIAL_TYPES = ["Coaching", "Office", "WFH", "Sleep", "Powernap", "Napping"]
 NEUTRAL_TYPES = []
 

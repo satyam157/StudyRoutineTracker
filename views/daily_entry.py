@@ -109,7 +109,7 @@ def render(USER, USER_CONFIG):
         _user_defaults = get_user_defaults(USER)
         base_activities = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
             "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
             "Turf", "Travelling", "Powernap"
         ]
@@ -194,7 +194,7 @@ def render(USER, USER_CONFIG):
         with _act_col:
             _all_acts = base_activities + custom + ["+ Add New"]
             _def_act_idx = _all_acts.index(_editing_activity_type) if _editing_activity_type in _all_acts else 0
-            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx)
+            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx, format_func=lambda x: "⚠️ Overthinking (Waste)" if x == "Overthinking" else x)
             
             if st.session_state.get("last_selected_activity") != activity:
                 # Don't wipe edit state when editing mode just loaded with the correct activity
@@ -514,8 +514,26 @@ def render(USER, USER_CONFIG):
             _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
             sub2 = _final_val(_t2, _base_dest)
             st.caption("💡 For multi-day trips with study tracking, use the **✈️ Log Trip** tab.")
+        elif activity == "Overthinking":
+            st.markdown("""
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1.5px solid #ef4444; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 22px;">⚠️</span>
+                <div>
+                    <span style="color: #fca5a5; font-weight: 700; font-size: 13.5px;">Waste Activity Alert — Overthinking</span><br>
+                    <span style="color: #94a3b8; font-size: 11.5px;">Track your overthinking triggers to identify patterns and reclaim your study focus.</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            _def_sub1, _def_sub2 = _user_defaults.get("Overthinking", ("", ""))
+            _def_ot_idx = 0
+            if _def_sub1 in overthinking_triggers:
+                _def_ot_idx = overthinking_triggers.index(_def_sub1)
+            sub1 = st.selectbox("Trigger / Topic", overthinking_triggers, index=_def_ot_idx, key="de_ot_trigger")
+            _v2, _p2 = _val_ph(_def_sub2, "Trigger details / What caused it?")
+            _t2 = st.text_input("Details / What triggered it? (Optional)", value=_v2, placeholder=_p2, key="de_ot_notes")
+            sub2 = _final_val(_t2, _def_sub2)
     
-        _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test"]
+        _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test", "Entertainment"]
         _track_by_expense = activity in ["Food", "Transport"]
         if activity in custom:
             _track_both = (custom_track_map.get(activity) == "Expense (₹)")
@@ -711,7 +729,8 @@ def render(USER, USER_CONFIG):
         else:
             for _, _row in _today_df.iterrows():
                 rid = int(_row['id'])
-                parts = [_row['type']]
+                _act_disp = f"⚠️ {_row['type']}" if _row['type'] in ("Overthinking", "⚠️ Overthinking") else _row['type']
+                parts = [_act_disp]
                 if _row['subject']: parts.append(str(_row['subject']))
                 ch = get_clean_chapter(_row['chapter'])
                 st_v = _row.get('start_time') or ""
@@ -912,6 +931,7 @@ def render(USER, USER_CONFIG):
             st.caption("Track chapters completed during this trip:")
             _lt_all_subjs = get_user_subjects(USER)
             _lt_study_entries = []
+            _lt_study_raw = []
             
             if not _lt_all_subjs:
                 st.info("You don't have any subjects added yet.")
@@ -934,6 +954,9 @@ def render(USER, USER_CONFIG):
                         )
                     if _subj_val and _subj_val.strip() and _ch_val and _ch_val.strip():
                         _lt_study_entries.append(f"{_subj_val.strip()} ({_ch_val.strip()})")
+                        # Also collect raw pairs for creating individual Study rows
+                        _ch_list = [c.strip() for c in _ch_val.split(',') if c.strip()]
+                        _lt_study_raw.append((_subj_val.strip(), _ch_list))
 
                 _sadd_col, _srem_col = st.columns([1, 1])
                 with _sadd_col:
@@ -982,6 +1005,17 @@ def render(USER, USER_CONFIG):
                     "INSERT INTO activities (date, type, subject, chapter, duration, amount, username, start_time, description, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (str(_trip_start), 'Travelling', _trip_mode, _chapter_val, float(_num_trip_days), float(_trip_cost), USER, '', _desc_val, 'Completed')
                 )
+
+                # Insert individual Study activities for each chapter studied during the trip
+                # These will be counted in analysis, graphs, and target tracking
+                if _lt_study_raw:
+                    for _study_subj, _study_chapters in _lt_study_raw:
+                        for _ch_name in _study_chapters:
+                            c.execute(
+                                "INSERT INTO activities (date, type, subject, chapter, duration, amount, username, start_time, description, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (str(_trip_start), 'Study during trip', _study_subj, _ch_name, 0.0, 0.0, USER, '', f'During trip: {_dest_str}', 'Completed')
+                            )
+
                 conn.commit()
                 invalidate_activities_cache(USER)
                 # Reset destination and study counts
@@ -1248,16 +1282,16 @@ def render(USER, USER_CONFIG):
         </div>
         """, unsafe_allow_html=True)
     
-        _base_acts = [
+        _ACT_TYPES = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
             "Office", "WFH", "Coaching", "WentOutside", "Turf", "Travelling"
         ]
         # Query custom activities
         _custom_acts_df = read_sql("SELECT name FROM custom_boxes WHERE username=%s", (USER,))
         _custom_acts = _custom_acts_df['name'].tolist() if not _custom_acts_df.empty else []
         
-        all_config_acts = _base_acts + _custom_acts
+        all_config_acts = _ACT_TYPES + _custom_acts
         
         # Load existing defaults
         _current_defaults = get_user_defaults(USER)
@@ -1376,6 +1410,13 @@ def render(USER, USER_CONFIG):
         elif selected_config_act == "Turf":
             new_def_sub1 = st.text_input("Default Sport", value=def_sub1_val, key="cfg_turf_sport")
             new_def_sub2 = st.text_input("Default Details", value=def_sub2_val, key="cfg_turf_detail")
+            
+        elif selected_config_act == "Overthinking":
+            _ot_idx = 0
+            if def_sub1_val in overthinking_triggers:
+                _ot_idx = overthinking_triggers.index(def_sub1_val)
+            new_def_sub1 = st.selectbox("Default Trigger / Topic", overthinking_triggers, index=_ot_idx, key="cfg_ot_trigger")
+            new_def_sub2 = st.text_input("Default Trigger Details", value=def_sub2_val, key="cfg_ot_notes")
             
         else:
             # Custom/Default general activities (Office, WFH, Coaching, WentOutside, Custom activities, etc.)

@@ -36,35 +36,42 @@ def render(USER, USER_CONFIG):
             if goal_type == "Custom":
                 custom_unit_input = st.text_input("Custom Unit Name", placeholder="e.g. Flashcards")
     
-        fe1, fe2 = st.columns(2)
+        fe1, fe2, fe3 = st.columns(3)
         with fe1:
             unit_label = custom_unit_input if (goal_type == "Custom" and custom_unit_input) else goal_type
             total_ch = st.number_input(f"Goal Amount ({unit_label})", min_value=0, step=1)
         with fe2:
-            deadline = st.date_input("Deadline")
+            start_date_val = st.date_input(
+                "Start Date",
+                value=_sm_dt.date.today(),
+                help="Only activities logged on or after this date will be counted toward this target."
+            )
+        with fe3:
+            deadline = st.date_input("Deadline", value=_sm_dt.date.today())
     
         if st.form_submit_button("💾 Save New Target"):
             final_subject = custom_subject_input.strip() if subj_choice == "➕ Custom Subject" else subj_choice
             final_unit    = custom_unit_input.strip() if goal_type == "Custom" else goal_type
+            start_date_str = str(start_date_val)
             if not final_subject:
                 st.error("Please enter a subject name.")
             else:
                 date_created = str(_sm_dt.date.today())
                 c.execute(
-                    """INSERT INTO targets(subject,total_chapters,deadline,username,date_created,ai_feedback,goal_type,goal_unit,custom_subject)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (final_subject, int(total_ch), str(deadline), USER, date_created, "", goal_type, final_unit, custom_subject_input.strip())
+                    """INSERT INTO targets(subject,total_chapters,deadline,username,date_created,ai_feedback,goal_type,goal_unit,custom_subject,start_time)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (final_subject, int(total_ch), str(deadline), USER, date_created, "", goal_type, final_unit, custom_subject_input.strip(), start_date_str)
                 )
                 # Also add custom subject to user_subjects table so it's available everywhere
                 if subj_choice == "➕ Custom Subject":
                     c.execute("INSERT INTO user_subjects (username, subject) VALUES (%s, %s) ON CONFLICT DO NOTHING", (USER, final_subject))
                 conn.commit()
-                st.toast(f"✅ Target for '{final_subject}' saved!", icon="✅")
+                st.toast(f"✅ Target for '{final_subject}' saved! (counting from {start_date_str})", icon="✅")
                 st.rerun()
     
     st.divider()
     tgt_df = read_sql("SELECT * FROM targets WHERE username=%s", (USER,))
-    act_df = read_sql("SELECT * FROM activities WHERE username=%s AND type IN ('Study', 'Revision', 'Test')", (USER,))
+    act_df = read_sql("SELECT * FROM activities WHERE username=%s AND type IN ('Study', 'Study during trip', 'Revision', 'Test')", (USER,))
     if not act_df.empty:
         if 'start_time' not in act_df.columns: act_df['start_time'] = None
         act_df['start_time'] = act_df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
@@ -75,9 +82,49 @@ def render(USER, USER_CONFIG):
     else:
         st.subheader("🎯 Target Overview")
         display_data = []
+        # ── Aug-12 IR split: before → mpuri-IR, from Aug12 → IR ──────────────
+        _IR_CUTOFF = _sm_dt.date(2026, 8, 12)
+        _IR_NAMES   = {'ir', 'international relations', 'international relation'}
+
+        def _resolve_subject(t_subject, t_date_created):
+            if str(t_subject).strip().lower() in _IR_NAMES:
+                try:
+                    dc = pd.to_datetime(t_date_created).date()
+                except Exception:
+                    dc = _sm_dt.date.today()
+                if dc < _IR_CUTOFF:
+                    return 'mpuri-IR'
+                else:
+                    return 'IR'
+            return t_subject
+
+        def _get_target_display_name(t, all_tgt_df):
+            sub = str(t.get('subject', ''))
+            if all_tgt_df is None or all_tgt_df.empty:
+                return sub
+            same_subs = all_tgt_df[all_tgt_df['subject'].astype(str).str.strip().str.lower() == sub.strip().lower()]
+            if len(same_subs) > 1:
+                sd = t.get('start_time') or ''
+                if not (sd and str(sd).strip() and str(sd).strip().lower() not in ('none', 'nan', 'null')):
+                    sd = t.get('date_created') or ''
+                try:
+                    dt = pd.to_datetime(sd)
+                    month_year = dt.strftime('%b %Y')
+                    return f"{sub} ({month_year})"
+                except Exception:
+                    return sub
+            return sub
+
         for _, t in tgt_df.iterrows():
-            sub      = t['subject']
-            sub_acts = act_df[act_df['subject'] == sub]
+            sub = t['subject']
+            disp_sub = _get_target_display_name(t, tgt_df)
+            _tgt_start_date = t.get('start_time') or ''
+            effective_start = _tgt_start_date if (_tgt_start_date and str(_tgt_start_date).strip().lower() not in ('none', 'nan', 'null')) else t.get('date_created', '')
+            resolved_sub = _resolve_subject(sub, t.get('date_created'))
+            sub_acts = act_df[act_df['subject'] == resolved_sub].copy()
+            if effective_start:
+                sub_acts['_date'] = pd.to_datetime(sub_acts['date']).dt.date
+                sub_acts = sub_acts[sub_acts['_date'] >= pd.to_datetime(effective_start).date()]
             hours_taken = round(sub_acts['duration'].sum(), 2)
             days_taken  = sub_acts['date'].nunique()
             # Use clean chapter names to count unique chapters
@@ -99,11 +146,12 @@ def render(USER, USER_CONFIG):
             goal_unit = t.get('goal_unit', 'Chapters') or 'Chapters'
             percent = round(min((done / total) * 100, 100), 1) if total > 0 else (0 if done == 0 else 100)
             display_data.append({
-                "Subject":         sub,
+                "Subject":         disp_sub,
                 "Goal Type":       goal_unit,
                 f"Goal ({goal_unit})": total,
                 f"Done ({goal_unit})": done,
                 "Achieved %":      f"{percent}%",
+                "Start Date":      effective_start,
                 "Deadline":        t['deadline'],
                 "Days Studied":    days_taken,
                 "Hours Logged":    hours_taken,
@@ -261,26 +309,41 @@ def render(USER, USER_CONFIG):
         # SECTION: DELETE TARGET
         # ════════════════════════════════════════════════════════
         st.subheader("🗑️ Delete a Target")
-        del_sub = st.selectbox("Select target to delete", [t['subject'] for _, t in tgt_df.iterrows()], key="del_tgt_sel")
-        del_row = tgt_df[tgt_df['subject'] == del_sub].iloc[0]
-        del_cols = st.columns([2,1,1])
-        with del_cols[0]:
-            if st.button("🗑️ Delete Target", key="del_tgt_btn"):
-                st.session_state["confirm_del_tgt"] = True
-        if st.session_state.get("confirm_del_tgt", False):
-            st.warning(f"Delete target for **{del_sub}**? This cannot be undone.")
-            yc, nc = st.columns(2)
-            with yc:
-                if st.button("✅ Yes, Delete", key="yes_del_tgt"):
-                    c.execute("DELETE FROM targets WHERE id=%s AND username=%s", (int(del_row['id']), USER))
-                    conn.commit()
-                    st.session_state["confirm_del_tgt"] = False
-                    st.toast(f"🗑️ Target '{del_sub}' deleted.", icon="🗑️")
-                    st.rerun()
-            with nc:
-                if st.button("❌ No, Keep", key="no_del_tgt"):
-                    st.session_state["confirm_del_tgt"] = False
-                    st.rerun()
+        del_options = {t['id']: f"{_get_target_display_name(t, tgt_df)} (ID: #{t['id']}, Goal: {t['total_chapters']} {t.get('goal_unit', 'Chapters')})" for _, t in tgt_df.iterrows()}
+        del_id = st.selectbox(
+            "Select target to delete",
+            options=list(del_options.keys()),
+            index=None,
+            placeholder="Select target to delete...",
+            format_func=lambda x: del_options.get(x, ""),
+            key="del_tgt_sel"
+        )
+        if del_id is not None:
+            del_row_matches = tgt_df[tgt_df['id'] == del_id]
+            if not del_row_matches.empty:
+                del_row = del_row_matches.iloc[0]
+                del_name = _get_target_display_name(del_row, tgt_df)
+                del_cols = st.columns([2,1,1])
+                with del_cols[0]:
+                    if st.button("🗑️ Delete Target", key="del_tgt_btn"):
+                        st.session_state["confirm_del_tgt"] = True
+                if st.session_state.get("confirm_del_tgt", False):
+                    st.warning(f"Delete target for **{del_name}**? This cannot be undone.")
+                    yc, nc = st.columns(2)
+                    with yc:
+                        if st.button("✅ Yes, Delete", key="yes_del_tgt"):
+                            c.execute("DELETE FROM targets WHERE id=%s AND username=%s", (int(del_row['id']), USER))
+                            conn.commit()
+                            st.session_state["confirm_del_tgt"] = False
+                            st.toast(f"🗑️ Target '{del_name}' deleted.", icon="🗑️")
+                            st.rerun()
+                    with nc:
+                        if st.button("❌ No, Keep", key="no_del_tgt"):
+                            st.session_state["confirm_del_tgt"] = False
+                            st.rerun()
+        else:
+            if "confirm_del_tgt" in st.session_state:
+                st.session_state["confirm_del_tgt"] = False
     
     # ── SMART WORK TIPS (Set Target Page) ──
     _st_tips = generate_smart_work_tips(

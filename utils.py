@@ -170,12 +170,11 @@ def get_song_lists():
 
     all_mp3s = st.session_state.all_mp3s
 
-    if "Perfect.mp3" in all_mp3s:
-        temp_list = list(all_mp3s)
-        temp_list.remove("Perfect.mp3")
-        temp_list.sort()
-        temp_list.insert(0, "Perfect.mp3")
-        all_mp3s = temp_list
+    perfect_items = [f for f in all_mp3s if os.path.basename(f).lower() == "perfect.mp3"]
+    if perfect_items:
+        other_items = [f for f in all_mp3s if os.path.basename(f).lower() != "perfect.mp3"]
+        other_items.sort()
+        all_mp3s = [perfect_items[0]] + other_items
     else:
         all_mp3s = sorted(all_mp3s)
 
@@ -195,22 +194,34 @@ def get_song_lists():
     return all_mp3s, song_options_dict, song_names_list
 
 def format_duration(dur):
-    if dur is None or dur <= 0:
+    """Convert decimal hours to human-readable 'Xhr Ymin Zsec' format.
+    e.g. 54.456 -> '54hr 27min 21sec'
+    """
+    if dur is None:
         return ""
     try:
         dur = float(dur)
     except:
         return ""
-    hours = int(dur)
-    minutes = int(round((dur - hours) * 60))
-    if minutes == 60:
-        hours += 1
-        minutes = 0
-    if hours > 0 and minutes > 0:
-        return f"{hours}Hr{minutes}M"
+    if dur <= 0:
+        return ""
+    total_seconds = int(round(dur * 3600))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    if hours > 0 and minutes > 0 and seconds > 0:
+        return f"{hours}hr {minutes}min {seconds}sec"
+    elif hours > 0 and minutes > 0:
+        return f"{hours}hr {minutes}min"
+    elif hours > 0 and seconds > 0:
+        return f"{hours}hr {seconds}sec"
     elif hours > 0:
-        return f"{hours}Hr"
+        return f"{hours}hr"
+    elif minutes > 0 and seconds > 0:
+        return f"{minutes}min {seconds}sec"
+    elif minutes > 0:
+        return f"{minutes}min"
     else:
-        return f"{minutes}M"
+        return f"{seconds}sec"
 
 
