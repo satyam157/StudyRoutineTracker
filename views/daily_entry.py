@@ -863,9 +863,9 @@ def render(USER, USER_CONFIG):
         with _trip_tab_entry:
             _tc1, _tc2 = st.columns(2)
             with _tc1:
-                _trip_start = st.date_input("📅 Start Date", value=get_ist_now().date(), key="lt_start_date")
+                _trip_start = st.date_input("📅 Start Date", value=database.get_ist_now().date(), key="lt_start_date")
             with _tc2:
-                _trip_end = st.date_input("📅 End Date", value=get_ist_now().date(), key="lt_end_date")
+                _trip_end = st.date_input("📅 End Date", value=database.get_ist_now().date(), key="lt_end_date")
 
             _trip_dest = st.text_input("📍 Destination", placeholder="e.g. Katihar, Banaras", key="lt_dest")
             _trip_mode = st.selectbox("🚗 Transport Mode", _trip_travel_modes, index=2, key="lt_mode")
