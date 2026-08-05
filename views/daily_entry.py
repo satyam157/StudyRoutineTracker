@@ -1127,7 +1127,11 @@ def render(USER, USER_CONFIG):
 
                 _desc_html = ''
                 if _desc_str:
-                    _desc_html = f"""<div style="margin-top:6px; font-size:12px; color:#94a3b8; font-style:italic;">💬 {_desc_str}</div>"""
+                    _desc_html = f"""
+        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
+            <div style="color:#94a3b8; font-size:11px; font-weight:600;">👥 COMPANION</div>
+            <div style="color:#e2e8f0; font-size:14px; font-weight:700; margin-top:2px;">{_desc_str}</div>
+        </div>"""
 
                 # Left-align to prevent Markdown from rendering it as an indented code block
                 st.markdown(f"""
@@ -1156,9 +1160,9 @@ def render(USER, USER_CONFIG):
             <div style="color:#94a3b8; font-size:11px; font-weight:600;">📅 DAYS</div>
             <div style="color:#fbbf24; font-size:14px; font-weight:700; margin-top:2px;">{_num_days}</div>
         </div>
+        {_desc_html}
     </div>
     {_study_html}
-    {_desc_html}
 </div>
 """, unsafe_allow_html=True)
 
