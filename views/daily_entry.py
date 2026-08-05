@@ -505,50 +505,15 @@ def render(USER, USER_CONFIG):
             _def_travel_idx = 2
             if _def_sub1 in _travel_modes:
                 _def_travel_idx = _travel_modes.index(_def_sub1)
+            sub1 = st.selectbox("Mode", _travel_modes, index=_def_travel_idx, key="de_travel_mode")
             
-            _t_trip, _t_study = st.tabs(["🚗 Trip Details", "📚 Study During Trip"])
-            with _t_trip:
-                sub1 = st.selectbox("Mode", _travel_modes, index=_def_travel_idx, key="de_travel_mode")
-                
-                _base_dest = _def_sub2
-                _parsed_study = {}
-                if _is_editing_act and " | Studied: " in _def_sub2:
-                    parts = _def_sub2.split(" | Studied: ")
-                    _base_dest = parts[0]
-                    study_part = parts[1]
-                    # Parse format like "History (Ch 1), Polity (Ch 2)"
-                    import re
-                    matches = re.findall(r'([^,]+?)\s*\(([^)]+)\)', study_part)
-                    for m in matches:
-                        subj_name = m[0].strip()
-                        if subj_name.startswith('and '):
-                            subj_name = subj_name[4:].strip()
-                        _parsed_study[subj_name] = m[1].strip()
-                
-                _v2, _p2 = _val_ph(_base_dest, "Destination")
-                _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
-                _dest = _final_val(_t2, _base_dest)
-            
-            with _t_study:
-                st.caption("Track chapters completed during this trip:")
-                _all_subjs = get_user_subjects(USER)
-                _default_subjs = [s for s in _parsed_study.keys() if s in _all_subjs]
-                
-                _selected_subjs = st.multiselect("Subjects Studied", _all_subjs, default=_default_subjs if _is_editing_act else None, key="de_travel_study_subjs")
-                
-                _study_entries = []
-                for subj in _selected_subjs:
-                    _base_ch = _parsed_study.get(subj, "")
-                    _v_study, _p_study = _val_ph(_base_ch, "e.g. Chapter 1")
-                    _study_ch_input = st.text_input(f"Chapters for {subj}", value=_v_study, placeholder=_p_study, key=f"de_travel_study_ch_{subj}")
-                    _study_ch = _final_val(_study_ch_input, _base_ch)
-                    if _study_ch.strip():
-                        _study_entries.append(f"{subj} ({_study_ch.strip()})")
-            
-            if _study_entries:
-                sub2 = f"{_dest} | Studied: " + ", ".join(_study_entries)
-            else:
-                sub2 = _dest
+            _base_dest = _def_sub2
+            if _is_editing_act and " | Studied: " in _def_sub2:
+                _base_dest = _def_sub2.split(" | Studied: ")[0]
+            _v2, _p2 = _val_ph(_base_dest, "Destination")
+            _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
+            sub2 = _final_val(_t2, _base_dest)
+            st.caption("💡 For multi-day trips with study tracking, use the **✈️ Log Trip** tab.")
     
         _track_both = activity in ["Food", "Transport", "WentOutside", "Turf", "Travelling", "Office", "WFH", "Coaching", "Test"]
         _track_by_expense = activity in ["Food", "Transport"]
@@ -886,94 +851,192 @@ def render(USER, USER_CONFIG):
     elif selected_tab == "✈️ Log Trip":
         st.markdown("""
         <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1a2744 100%); border: 1.5px solid #f59e0b; border-radius: 14px; padding: 18px 20px 10px 20px; margin-bottom: 18px;">
-            <div style="font-size:17px; font-weight:700; color:#fbbf24; margin-bottom:4px;">✈️ Past Trips</div>
-            <div style="font-size:13px; color:#94a3b8;">All your past trips aggregated by destination. Each card shows trip details including dates, cost, transport, and study info.</div>
+            <div style="font-size:17px; font-weight:700; color:#fbbf24; margin-bottom:4px;">✈️ Log Trip</div>
+            <div style="font-size:13px; color:#94a3b8;">Log multi-day trips with date range, transport, cost, and study details. Each trip is saved as a single entry.</div>
         </div>
         """, unsafe_allow_html=True)
 
-        # Fetch all Travelling activities for this user
+        # ── TRIP ENTRY FORM ──
+        _trip_travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
+        _trip_tab_entry, _trip_tab_study = st.tabs(["🚗 Trip Details", "📚 Study During Trip"])
+
+        with _trip_tab_entry:
+            _tc1, _tc2 = st.columns(2)
+            with _tc1:
+                _trip_start = st.date_input("📅 Start Date", value=get_ist_now().date(), key="lt_start_date")
+            with _tc2:
+                _trip_end = st.date_input("📅 End Date", value=get_ist_now().date(), key="lt_end_date")
+
+            _trip_dest = st.text_input("📍 Destination", placeholder="e.g. Katihar, Banaras", key="lt_dest")
+            _trip_mode = st.selectbox("🚗 Transport Mode", _trip_travel_modes, index=2, key="lt_mode")
+            _trip_cost = st.number_input("💰 Total Cost (₹)", min_value=0.0, step=100.0, key="lt_cost")
+            _trip_desc = st.text_input("📝 Description (Optional)", placeholder="e.g. Family trip, solo trip", key="lt_desc")
+
+        with _trip_tab_study:
+            st.caption("Track chapters completed during this trip:")
+            _lt_all_subjs = get_user_subjects(USER)
+            _lt_selected_subjs = st.multiselect("Subjects Studied", _lt_all_subjs, key="lt_study_subjs")
+            _lt_study_entries = []
+            for _lt_subj in _lt_selected_subjs:
+                _lt_ch_input = st.text_input(f"Chapters for {_lt_subj}", placeholder="e.g. Chapter 1, 2", key=f"lt_study_ch_{_lt_subj}")
+                if _lt_ch_input and _lt_ch_input.strip():
+                    _lt_study_entries.append(f"{_lt_subj} ({_lt_ch_input.strip()})")
+
+        # Submit button
+        if st.button("💾 Save Trip", key="lt_save_trip", use_container_width=True, type="primary"):
+            if not _trip_dest or not _trip_dest.strip():
+                st.warning("Please enter a destination.")
+            elif _trip_end < _trip_start:
+                st.warning("End date cannot be before start date.")
+            else:
+                _num_trip_days = (_trip_end - _trip_start).days + 1
+                _chapter_val = _trip_dest.strip()
+                if _lt_study_entries:
+                    _chapter_val += " | Studied: " + ", ".join(_lt_study_entries)
+
+                # Encode end_date in description as prefix: "END:YYYY-MM-DD" or "END:YYYY-MM-DD | user desc"
+                _desc_val = f"END:{str(_trip_end)}"
+                if _trip_desc and _trip_desc.strip():
+                    _desc_val += f" | {_trip_desc.strip()}"
+
+                # Store as a SINGLE entry: date=start_date, duration=num_days, amount=cost
+                conn = database.conn
+                c = database.c
+                c.execute(
+                    "INSERT INTO activities (date, type, subject, chapter, duration, amount, username, start_time, description, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (str(_trip_start), 'Travelling', _trip_mode, _chapter_val, float(_num_trip_days), float(_trip_cost), USER, '', _desc_val, 'Completed')
+                )
+                conn.commit()
+                invalidate_activities_cache(USER)
+                st.toast(f"✅ Trip to {_trip_dest.strip()} saved! ({_num_trip_days} days)", icon="✅")
+                import time; time.sleep(1); st.rerun()
+
+        st.divider()
+
+        # ── PAST TRIPS DISPLAY ──
+        st.markdown("""
+        <div style="font-size:17px; font-weight:700; color:#fbbf24; margin-bottom:12px;">🗺️ Past Trips</div>
+        """, unsafe_allow_html=True)
+
         _trip_df = read_sql(
-            "SELECT date, subject, chapter, duration, amount, description FROM activities WHERE username=%s AND type='Travelling' ORDER BY date ASC",
+            "SELECT id, date, subject, chapter, duration, amount, description FROM activities WHERE username=%s AND type='Travelling' ORDER BY date DESC",
             (USER,)
         )
 
         if _trip_df.empty:
-            st.info("No trips logged yet. Log a 'Travelling' activity to see your trip history here! 🗺️")
+            st.info("No trips logged yet. Fill in the form above and click Save Trip! 🗺️")
         else:
             import re as _re
-            from datetime import datetime as _dt
 
-            # Extract base destination (before " | Studied: " if present)
             def _extract_dest(ch):
-                if not ch or str(ch).strip().lower() in ('none', 'nan', 'null'):
-                    return ''
+                if not ch or str(ch).strip().lower() in ('none', 'nan', 'null'): return ''
                 s = str(ch)
-                if ' | Studied: ' in s:
-                    return s.split(' | Studied: ')[0].strip()
+                if ' | Studied: ' in s: return s.split(' | Studied: ')[0].strip()
                 return s.strip()
 
             def _extract_study_info(ch):
-                if not ch or ' | Studied: ' not in str(ch):
-                    return ''
+                if not ch or ' | Studied: ' not in str(ch): return ''
                 return str(ch).split(' | Studied: ')[1].strip()
 
+            def _parse_end_date(desc):
+                """Extract end date from description with format END:YYYY-MM-DD ..."""
+                if not desc or not str(desc).startswith('END:'):
+                    return None
+                try:
+                    end_part = str(desc).split('|')[0].replace('END:', '').strip()
+                    return pd.to_datetime(end_part)
+                except: return None
+
+            def _parse_user_desc(desc):
+                """Extract user description (after END:date | )"""
+                if not desc: return ''
+                s = str(desc)
+                if s.startswith('END:') and '|' in s:
+                    return s.split('|', 1)[1].strip()
+                if not s.startswith('END:'):
+                    return s.strip() if s.strip().lower() not in ('none', 'nan', 'null') else ''
+                return ''
+
+            # Build trip list — each row is already a single trip entry (new format)
+            # or an old day-by-day entry (legacy). Group legacy entries by consecutive dest.
             _trip_df['dest'] = _trip_df['chapter'].apply(_extract_dest)
             _trip_df['study_info'] = _trip_df['chapter'].apply(_extract_study_info)
+            _trip_df['end_date_parsed'] = _trip_df['description'].apply(_parse_end_date)
+            _trip_df['user_desc'] = _trip_df['description'].apply(_parse_user_desc)
             _trip_df['date_parsed'] = pd.to_datetime(_trip_df['date'])
 
-            # Group consecutive dates with the same destination into trips
-            # Algorithm: sort by date, walk through rows; if same dest and date is within 1 day
-            # of previous, extend current trip; otherwise start a new trip.
-            _trip_df = _trip_df.sort_values('date_parsed').reset_index(drop=True)
+            # Separate new-format (has END: prefix) and legacy entries
+            _new_fmt = _trip_df[_trip_df['description'].apply(lambda x: str(x).startswith('END:') if x else False)].copy()
+            _legacy = _trip_df[~_trip_df['description'].apply(lambda x: str(x).startswith('END:') if x else False)].copy()
 
             trips = []
-            current_trip = None
 
-            for _, row in _trip_df.iterrows():
-                dest = row['dest']
-                d = row['date_parsed']
-                transport = row['subject'] or ''
-                dur = float(row['duration'] or 0)
-                amt = float(row['amount'] or 0)
-                study = row['study_info']
-                desc = row['description'] if row['description'] and str(row['description']).strip().lower() not in ('none', 'nan', 'null') else ''
+            # New format trips: each row is one trip
+            for _, row in _new_fmt.iterrows():
+                _end = row['end_date_parsed'] if row['end_date_parsed'] is not None else row['date_parsed']
+                _num_days = int(float(row['duration'])) if row['duration'] and float(row['duration']) >= 1 else ((_end - row['date_parsed']).days + 1)
+                trips.append({
+                    'id': int(row['id']),
+                    'dest': row['dest'] or 'Unknown',
+                    'start_date': row['date_parsed'],
+                    'end_date': _end,
+                    'num_days': _num_days,
+                    'total_cost': float(row['amount'] or 0),
+                    'transports': [row['subject']] if row['subject'] else [],
+                    'study_str': row['study_info'],
+                    'desc_str': row['user_desc'],
+                    'is_new_fmt': True,
+                })
 
-                if current_trip and current_trip['dest'] == dest and (d - current_trip['end_date']).days <= 1:
-                    # Extend current trip
-                    current_trip['end_date'] = d
-                    current_trip['total_hours'] += dur
-                    current_trip['total_cost'] += amt
-                    current_trip['dates'].append(str(row['date']))
-                    if transport and transport not in current_trip['transports']:
-                        current_trip['transports'].append(transport)
-                    if study:
-                        current_trip['study_entries'].append(study)
-                    if desc and desc not in current_trip['descriptions']:
-                        current_trip['descriptions'].append(desc)
-                else:
-                    # Save previous trip
-                    if current_trip:
-                        trips.append(current_trip)
-                    # Start new trip
-                    current_trip = {
-                        'dest': dest,
-                        'start_date': d,
-                        'end_date': d,
-                        'total_hours': dur,
-                        'total_cost': amt,
-                        'transports': [transport] if transport else [],
-                        'dates': [str(row['date'])],
-                        'study_entries': [study] if study else [],
-                        'descriptions': [desc] if desc else [],
-                    }
+            # Legacy format: group consecutive days with same destination
+            if not _legacy.empty:
+                _legacy = _legacy.sort_values('date_parsed').reset_index(drop=True)
+                _cur = None
+                for _, row in _legacy.iterrows():
+                    dest = row['dest']
+                    d = row['date_parsed']
+                    transport = row['subject'] or ''
+                    amt = float(row['amount'] or 0)
+                    study = row['study_info']
+                    desc = row['user_desc']
 
-            # Don't forget the last trip
-            if current_trip:
-                trips.append(current_trip)
+                    if _cur and _cur['dest'] == dest and (d - _cur['end_date']).days <= 1:
+                        _cur['end_date'] = d
+                        _cur['total_cost'] += amt
+                        _cur['num_days'] += 1
+                        if transport and transport not in _cur['transports']: _cur['transports'].append(transport)
+                        if study and study not in _cur['study_entries']: _cur['study_entries'].append(study)
+                        if desc and desc not in _cur['desc_entries']: _cur['desc_entries'].append(desc)
+                    else:
+                        if _cur:
+                            trips.append({
+                                'id': None, 'dest': _cur['dest'], 'start_date': _cur['start_date'],
+                                'end_date': _cur['end_date'], 'num_days': _cur['num_days'],
+                                'total_cost': _cur['total_cost'], 'transports': _cur['transports'],
+                                'study_str': '; '.join(_cur['study_entries']),
+                                'desc_str': ' | '.join(_cur['desc_entries']),
+                                'is_new_fmt': False,
+                            })
+                        _cur = {
+                            'dest': dest, 'start_date': d, 'end_date': d, 'num_days': 1,
+                            'total_cost': amt, 'transports': [transport] if transport else [],
+                            'study_entries': [study] if study else [],
+                            'desc_entries': [desc] if desc else [],
+                        }
+                if _cur:
+                    trips.append({
+                        'id': None, 'dest': _cur['dest'], 'start_date': _cur['start_date'],
+                        'end_date': _cur['end_date'], 'num_days': _cur['num_days'],
+                        'total_cost': _cur['total_cost'], 'transports': _cur['transports'],
+                        'study_str': '; '.join(_cur['study_entries']),
+                        'desc_str': ' | '.join(_cur['desc_entries']),
+                        'is_new_fmt': False,
+                    })
 
-            # Sort trips by start date descending (most recent first)
+            # Sort by start date descending
             trips.sort(key=lambda t: t['start_date'], reverse=True)
 
+            # Summary stats
             st.markdown(f"""<div style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
                 <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
                     <span style="color:#94a3b8; font-size:12px;">Total Trips</span><br>
@@ -981,7 +1044,7 @@ def render(USER, USER_CONFIG):
                 </div>
                 <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
                     <span style="color:#94a3b8; font-size:12px;">Total Days Travelled</span><br>
-                    <span style="color:#38bdf8; font-size:22px; font-weight:700;">{sum(len(t['dates']) for t in trips)}</span>
+                    <span style="color:#38bdf8; font-size:22px; font-weight:700;">{sum(t['num_days'] for t in trips)}</span>
                 </div>
                 <div style="background:#1e293b; padding:10px 18px; border-radius:10px; border:1px solid #334155;">
                     <span style="color:#94a3b8; font-size:12px;">Total Spent</span><br>
@@ -989,13 +1052,13 @@ def render(USER, USER_CONFIG):
                 </div>
             </div>""", unsafe_allow_html=True)
 
-            for idx, trip in enumerate(trips):
+            # Render trip cards
+            for trip in trips:
                 _start = trip['start_date']
                 _end = trip['end_date']
-                _num_days = len(trip['dates'])
-                _dest = trip['dest'] or 'Unknown'
+                _num_days = trip['num_days']
+                _dest = trip['dest']
 
-                # Duration in months and days
                 _months = _num_days // 30
                 _remaining_days = _num_days % 30
                 if _months > 0 and _remaining_days > 0:
@@ -1011,21 +1074,9 @@ def render(USER, USER_CONFIG):
 
                 _transport_str = ', '.join(trip['transports']) if trip['transports'] else '—'
                 _cost_str = f"₹{trip['total_cost']:,.0f}" if trip['total_cost'] > 0 else '—'
-                _hours_str = format_duration(trip['total_hours']) if trip['total_hours'] > 0 else '—'
+                _study_str = trip.get('study_str', '')
+                _desc_str = trip.get('desc_str', '')
 
-                # Study info
-                _study_str = ''
-                if trip['study_entries']:
-                    _unique_study = []
-                    for s in trip['study_entries']:
-                        if s not in _unique_study:
-                            _unique_study.append(s)
-                    _study_str = '; '.join(_unique_study)
-
-                # Description
-                _desc_str = ' | '.join(trip['descriptions']) if trip['descriptions'] else ''
-
-                # Build the trip card HTML
                 _study_html = ''
                 if _study_str:
                     _study_html = f"""<div style="margin-top:8px; padding:8px 12px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); border-radius:8px;">
@@ -1045,7 +1096,6 @@ def render(USER, USER_CONFIG):
                     border-radius: 14px;
                     padding: 18px 22px;
                     margin-bottom: 14px;
-                    transition: all 0.25s ease;
                 ">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                         <div>
@@ -1056,7 +1106,6 @@ def render(USER, USER_CONFIG):
                             <span style="color:#fbbf24; font-size:14px; font-weight:700;">{_dur_str}</span>
                         </div>
                     </div>
-
                     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:14px;">
                         <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
                             <div style="color:#94a3b8; font-size:11px; font-weight:600;">🚗 TRANSPORT</div>
@@ -1067,10 +1116,6 @@ def render(USER, USER_CONFIG):
                             <div style="color:#22c55e; font-size:14px; font-weight:700; margin-top:2px;">{_cost_str}</div>
                         </div>
                         <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
-                            <div style="color:#94a3b8; font-size:11px; font-weight:600;">⏱️ TRAVEL HRS</div>
-                            <div style="color:#38bdf8; font-size:14px; font-weight:700; margin-top:2px;">{_hours_str}</div>
-                        </div>
-                        <div style="background:rgba(255,255,255,0.05); padding:10px 14px; border-radius:10px;">
                             <div style="color:#94a3b8; font-size:11px; font-weight:600;">📅 DAYS</div>
                             <div style="color:#fbbf24; font-size:14px; font-weight:700; margin-top:2px;">{_num_days}</div>
                         </div>
@@ -1079,6 +1124,27 @@ def render(USER, USER_CONFIG):
                     {_desc_html}
                 </div>
                 """, unsafe_allow_html=True)
+
+                # Delete button for new-format trips (single entry)
+                if trip.get('is_new_fmt') and trip.get('id'):
+                    _tid = trip['id']
+                    if st.button(f"🗑️ Delete Trip", key=f"del_trip_{_tid}"):
+                        st.session_state[f"confirm_trip_del_{_tid}"] = True
+                    if st.session_state.get(f"confirm_trip_del_{_tid}", False):
+                        st.warning("Delete this trip?", icon="⚠️")
+                        _yc, _nc = st.columns([1, 1])
+                        with _yc:
+                            if st.button("✅ Yes", key=f"yes_trip_del_{_tid}", use_container_width=True):
+                                database.c.execute("DELETE FROM activities WHERE id=%s AND username=%s", (_tid, USER))
+                                database.conn.commit()
+                                invalidate_activities_cache(USER)
+                                st.session_state[f"confirm_trip_del_{_tid}"] = False
+                                st.rerun()
+                        with _nc:
+                            if st.button("❌ No", key=f"no_trip_del_{_tid}", use_container_width=True):
+                                st.session_state[f"confirm_trip_del_{_tid}"] = False
+                                st.rerun()
+
 
     elif selected_tab == "⚙️ Manage Defaults":
         st.markdown("""
