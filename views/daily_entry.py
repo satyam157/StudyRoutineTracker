@@ -859,9 +859,11 @@ def render(USER, USER_CONFIG):
         # ── TRIP ENTRY FORM ──
         _trip_travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
 
-        # Initialize destination count in session state
+        # Initialize counts in session state
         if "lt_dest_count" not in st.session_state:
             st.session_state.lt_dest_count = 1
+        if "lt_study_count" not in st.session_state:
+            st.session_state.lt_study_count = 1
 
         st.markdown("<div style='font-weight:700; font-size:16px; margin-bottom:12px; color:#38bdf8;'>🚗 Trip Details</div>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -909,12 +911,47 @@ def render(USER, USER_CONFIG):
         with st.container(border=True):
             st.caption("Track chapters completed during this trip:")
             _lt_all_subjs = get_user_subjects(USER)
-            _lt_selected_subjs = st.multiselect("Subjects Studied", _lt_all_subjs, key="lt_study_subjs")
             _lt_study_entries = []
-            for _lt_subj in _lt_selected_subjs:
-                _lt_ch_input = st.text_input(f"Chapters for {_lt_subj}", placeholder="e.g. Chapter 1, 2", key=f"lt_study_ch_{_lt_subj}")
-                if _lt_ch_input and _lt_ch_input.strip():
-                    _lt_study_entries.append(f"{_lt_subj} ({_lt_ch_input.strip()})")
+            
+            if not _lt_all_subjs:
+                st.info("You don't have any subjects added yet.")
+            else:
+                for _si in range(st.session_state.lt_study_count):
+                    _scol1, _scol2 = st.columns([1, 2])
+                    with _scol1:
+                        _subj_val = st.selectbox(
+                            f"Subject {_si + 1}" if st.session_state.lt_study_count > 1 else "Subject",
+                            [""] + _lt_all_subjs,
+                            key=f"lt_study_subj_{_si}",
+                            label_visibility="collapsed" if _si > 0 else "visible"
+                        )
+                    with _scol2:
+                        _ch_val = st.text_input(
+                            f"Chapters {_si + 1}" if st.session_state.lt_study_count > 1 else "Chapters",
+                            placeholder="e.g. 1, 2, 3",
+                            key=f"lt_study_ch_{_si}",
+                            label_visibility="collapsed" if _si > 0 else "visible"
+                        )
+                    if _subj_val and _subj_val.strip() and _ch_val and _ch_val.strip():
+                        _lt_study_entries.append(f"{_subj_val.strip()} ({_ch_val.strip()})")
+
+                _sadd_col, _srem_col = st.columns([1, 1])
+                with _sadd_col:
+                    if st.button("➕ Add Subject", key="lt_add_study", use_container_width=True):
+                        st.session_state.lt_study_count += 1
+                        st.rerun()
+                with _srem_col:
+                    if st.session_state.lt_study_count > 1:
+                        if st.button("➖ Remove", key="lt_rem_study", use_container_width=True):
+                            # Clear the last study keys
+                            _last_subj_key = f"lt_study_subj_{st.session_state.lt_study_count - 1}"
+                            _last_ch_key = f"lt_study_ch_{st.session_state.lt_study_count - 1}"
+                            if _last_subj_key in st.session_state:
+                                del st.session_state[_last_subj_key]
+                            if _last_ch_key in st.session_state:
+                                del st.session_state[_last_ch_key]
+                            st.session_state.lt_study_count -= 1
+                            st.rerun()
 
         # Submit button
         if st.button("💾 Save Trip", key="lt_save_trip", use_container_width=True, type="primary"):
@@ -947,8 +984,9 @@ def render(USER, USER_CONFIG):
                 )
                 conn.commit()
                 invalidate_activities_cache(USER)
-                # Reset destination count
+                # Reset destination and study counts
                 st.session_state.lt_dest_count = 1
+                st.session_state.lt_study_count = 1
                 st.toast(f"✅ Trip to {_dest_str} saved! ({_num_trip_days} days)", icon="✅")
                 import time; time.sleep(1); st.rerun()
 
