@@ -858,13 +858,13 @@ def render(USER, USER_CONFIG):
 
         # ── TRIP ENTRY FORM ──
         _trip_travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
-        _trip_tab_entry, _trip_tab_study = st.tabs(["🚗 Trip Details", "📚 Study During Trip"])
 
         # Initialize destination count in session state
         if "lt_dest_count" not in st.session_state:
             st.session_state.lt_dest_count = 1
 
-        with _trip_tab_entry:
+        st.markdown("<div style='font-weight:700; font-size:16px; margin-bottom:12px; color:#38bdf8;'>🚗 Trip Details</div>", unsafe_allow_html=True)
+        with st.container(border=True):
             _tc1, _tc2 = st.columns(2)
             with _tc1:
                 _trip_start = st.date_input("📅 Start Date", value=database.get_ist_now().date(), key="lt_start_date")
@@ -903,9 +903,10 @@ def render(USER, USER_CONFIG):
 
             _trip_mode = st.selectbox("🚗 Transport Mode", _trip_travel_modes, index=2, key="lt_mode")
             _trip_cost = st.number_input("💰 Total Cost (₹)", min_value=0.0, step=100.0, key="lt_cost")
-            _trip_desc = st.text_input("📝 Description (Optional)", placeholder="e.g. Family trip, solo trip", key="lt_desc")
+            _trip_desc = st.text_input("📝 Description / Companions (Optional)", placeholder="e.g. Family trip, solo trip", key="lt_desc")
 
-        with _trip_tab_study:
+        st.markdown("<div style='font-weight:700; font-size:16px; margin-top:20px; margin-bottom:12px; color:#a78bfa;'>📚 Study During Trip</div>", unsafe_allow_html=True)
+        with st.container(border=True):
             st.caption("Track chapters completed during this trip:")
             _lt_all_subjs = get_user_subjects(USER)
             _lt_selected_subjs = st.multiselect("Subjects Studied", _lt_all_subjs, key="lt_study_subjs")
