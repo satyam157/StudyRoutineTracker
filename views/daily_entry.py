@@ -860,6 +860,10 @@ def render(USER, USER_CONFIG):
         _trip_travel_modes = ["✈️ Flight", "🚂 Railway", "🚗 Other"]
         _trip_tab_entry, _trip_tab_study = st.tabs(["🚗 Trip Details", "📚 Study During Trip"])
 
+        # Initialize destination count in session state
+        if "lt_dest_count" not in st.session_state:
+            st.session_state.lt_dest_count = 1
+
         with _trip_tab_entry:
             _tc1, _tc2 = st.columns(2)
             with _tc1:
@@ -867,7 +871,36 @@ def render(USER, USER_CONFIG):
             with _tc2:
                 _trip_end = st.date_input("📅 End Date", value=database.get_ist_now().date(), key="lt_end_date")
 
-            _trip_dest = st.text_input("📍 Destination", placeholder="e.g. Katihar, Banaras", key="lt_dest")
+            _trip_source = st.text_input("🏠 Source (From)", placeholder="e.g. Delhi, Patna", key="lt_source")
+
+            # Dynamic destinations
+            st.markdown("**📍 Destinations**")
+            _trip_dests = []
+            for _di in range(st.session_state.lt_dest_count):
+                _d_val = st.text_input(
+                    f"Destination {_di + 1}" if st.session_state.lt_dest_count > 1 else "Destination",
+                    placeholder="e.g. Katihar, Banaras",
+                    key=f"lt_dest_{_di}",
+                    label_visibility="collapsed" if _di > 0 else "visible"
+                )
+                if _d_val and _d_val.strip():
+                    _trip_dests.append(_d_val.strip())
+
+            _add_col, _rem_col = st.columns([1, 1])
+            with _add_col:
+                if st.button("➕ Add Destination", key="lt_add_dest", use_container_width=True):
+                    st.session_state.lt_dest_count += 1
+                    st.rerun()
+            with _rem_col:
+                if st.session_state.lt_dest_count > 1:
+                    if st.button("➖ Remove", key="lt_rem_dest", use_container_width=True):
+                        # Clear the last destination key
+                        _last_key = f"lt_dest_{st.session_state.lt_dest_count - 1}"
+                        if _last_key in st.session_state:
+                            del st.session_state[_last_key]
+                        st.session_state.lt_dest_count -= 1
+                        st.rerun()
+
             _trip_mode = st.selectbox("🚗 Transport Mode", _trip_travel_modes, index=2, key="lt_mode")
             _trip_cost = st.number_input("💰 Total Cost (₹)", min_value=0.0, step=100.0, key="lt_cost")
             _trip_desc = st.text_input("📝 Description (Optional)", placeholder="e.g. Family trip, solo trip", key="lt_desc")
@@ -884,13 +917,18 @@ def render(USER, USER_CONFIG):
 
         # Submit button
         if st.button("💾 Save Trip", key="lt_save_trip", use_container_width=True, type="primary"):
-            if not _trip_dest or not _trip_dest.strip():
-                st.warning("Please enter a destination.")
+            if not _trip_dests:
+                st.warning("Please enter at least one destination.")
             elif _trip_end < _trip_start:
                 st.warning("End date cannot be before start date.")
             else:
                 _num_trip_days = (_trip_end - _trip_start).days + 1
-                _chapter_val = _trip_dest.strip()
+                # Build chapter value: "Source → Dest1, Dest2" or just "Dest1, Dest2"
+                _dest_str = " → ".join(_trip_dests) if len(_trip_dests) > 1 else _trip_dests[0]
+                if _trip_source and _trip_source.strip():
+                    _chapter_val = f"{_trip_source.strip()} → {_dest_str}"
+                else:
+                    _chapter_val = _dest_str
                 if _lt_study_entries:
                     _chapter_val += " | Studied: " + ", ".join(_lt_study_entries)
 
@@ -908,7 +946,9 @@ def render(USER, USER_CONFIG):
                 )
                 conn.commit()
                 invalidate_activities_cache(USER)
-                st.toast(f"✅ Trip to {_trip_dest.strip()} saved! ({_num_trip_days} days)", icon="✅")
+                # Reset destination count
+                st.session_state.lt_dest_count = 1
+                st.toast(f"✅ Trip to {_dest_str} saved! ({_num_trip_days} days)", icon="✅")
                 import time; time.sleep(1); st.rerun()
 
         st.divider()
