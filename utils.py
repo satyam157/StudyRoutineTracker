@@ -67,6 +67,7 @@ def invalidate_activities_cache(user):
     Call this after any INSERT / UPDATE / DELETE on the activities table."""
     st.session_state.pop(f"_act_df_ts_{user}", None)
 
+@st.cache_data(ttl=120)
 def get_user_subjects(user):
     """Return the user-specific subject list from user_subjects table.
     On first call seeds the table with the default study_subjects."""
@@ -96,6 +97,13 @@ def get_user_subjects(user):
         from logic import study_subjects
         return study_subjects[:]
 
+def invalidate_user_subjects_cache():
+    try:
+        get_user_subjects.clear()
+    except Exception:
+        pass
+
+@st.cache_data(ttl=120)
 def get_user_defaults(username):
     """Retrieve saved default values for all activities for the user."""
     try:
@@ -104,21 +112,34 @@ def get_user_defaults(username):
     except Exception:
         return {}
 
-def get_all_songs(force_refresh=False):
-    # Find all supported audio files in the music directory
+def invalidate_user_defaults_cache():
+    try:
+        get_user_defaults.clear()
+    except Exception:
+        pass
+
+@st.cache_data(ttl=120)
+def get_custom_boxes(user):
+    """Return custom activities/boxes for the user."""
+    try:
+        return read_sql("SELECT name, activity_type FROM custom_boxes WHERE username=%s", (user,))
+    except Exception:
+        return pd.DataFrame()
+
+def invalidate_custom_boxes_cache():
+    try:
+        get_custom_boxes.clear()
+    except Exception:
+        pass
+
+@st.cache_data(ttl=300)
+def _fetch_all_songs():
     supported_exts = (".mp3", ".m4a", ".webm", ".wav", ".ogg")
     all_files = []
-    
-    # Check if music directory exists, else fallback to root
     search_dir = "music/**/*" if os.path.exists("music") else "**/*"
-    
     for ext in supported_exts:
         all_files.extend(glob.glob(f"{search_dir}{ext}", recursive=True))
-    
-    # Filter out anything in common hidden/ignored folders if searching root
     local_songs = [f for f in all_files if not any(x in f for x in ['.git', '__pycache__', 'venv', 'env'])]
-    
-    # Normalize paths to use forward slashes for consistency
     local_songs = [f.replace("\\", "/") for f in local_songs]
 
     if not supabase_client:
@@ -133,6 +154,15 @@ def get_all_songs(force_refresh=False):
     except Exception as e:
         print(f"Error listing Supabase songs: {e}")
         return sorted(list(set(local_songs)))
+
+def get_all_songs(force_refresh=False):
+    if force_refresh:
+        try:
+            _fetch_all_songs.clear()
+        except Exception:
+            pass
+    return _fetch_all_songs()
+
 
 def get_song_url(filename):
     # Check if file exists locally first

@@ -61,16 +61,17 @@ def render(USER, USER_CONFIG):
         
         # Load social data from activities table
         try:
-            sl_df = read_sql("""
-                SELECT 
-                    date, 
-                    SUM(CASE WHEN type = 'Entertainment' THEN duration ELSE 0 END) as entertainment_hours,
-                    SUM(CASE WHEN type = 'WentOutside' THEN duration ELSE 0 END) as went_outside_hours
-                FROM activities 
-                WHERE username=%s AND type IN ('Entertainment', 'WentOutside')
-                GROUP BY date
-            """, (USER,))
-            sl_map = {str(row['date']): row for _, row in sl_df.iterrows()}
+            if not df.empty:
+                sl_sub = df[df['type'].isin(['Entertainment', 'WentOutside'])].copy()
+                if not sl_sub.empty:
+                    sl_sub['ent'] = sl_sub.apply(lambda r: r['duration'] if r['type'] == 'Entertainment' else 0, axis=1)
+                    sl_sub['out'] = sl_sub.apply(lambda r: r['duration'] if r['type'] == 'WentOutside' else 0, axis=1)
+                    sl_grouped = sl_sub.groupby('date').agg({'ent': 'sum', 'out': 'sum'}).reset_index()
+                    sl_map = {str(row['date']): {'date': row['date'], 'entertainment_hours': row['ent'], 'went_outside_hours': row['out']} for _, row in sl_grouped.iterrows()}
+                else:
+                    sl_map = {}
+            else:
+                sl_map = {}
         except Exception:
             sl_map = {}
         

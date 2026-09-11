@@ -12,15 +12,62 @@ python -m py_compile app.py
 python -m streamlit run app.py --server.headless true
 
 
+Codeforces Performance Graph, Contribution Heatmaps, and Test Hours Exclusion
+We have implemented:
+
+Inverted Red Brightness Logic for Heatmap:
+Implemented your specified brightness direction in 
+
+cf_visuals.py
+:
+0 hrs (Inactive / Empty): Subtle dark slate (#1e293b)
+Level 1 (Less Activity / Lower Hours): Dark deep wine red (#6b1414)
+Level 2 (Moderate Activity): Medium crimson red (#b91c1c)
+Level 3 (High Activity): Vibrant bright scarlet red (#ef4444)
+Level 4 (Peak Activity / More Hours): Ultra-bright glowing neon red (#ff0033)
+Legend Updated: Less [#1e293b] [#6b1414] [#b91c1c] [#ef4444] [#ff0033] More. Higher hours now appear progressively brighter and more radiant.
+Codeforces Performance Graph & Heatmap Kept to Hours & Routine Metrics:
+Performance Graph: Plotted strictly against time in hours and routine scores:
+⏱️ Productive Hours (Excl. Test)
+⏱️ Total Productive Hours
+📚 Study Hours
+🔄 Revision Hours
+📝 Test Hours
+🎯 Productivity Score (%)
+🧠 Focus Score (%)
+😴 Sleep Hours
+Activity Filter: All 3 Combined, Study, Revision, Test, or 📑 Stacked View (All 3).
+Year Filter: Last 365 Days, 2026, 2025, 2024, etc.
+Graph Metric Selector: Switch between Productive Hours (Excl. Test), Total Productive Hours, Study Hours, Revision Hours, Test Hours, Productivity Score (%), and Focus Score (%).
+Verification & Results
+Top 10 Productive Days (Excl. Test)
+Before the change, 24 May 2026 was ranked #1 due to a 17.0h D-Day Exam (Test). With the new logic:
 
 
+Top 5 Productive Days (Excl. Test):
+                Period  productive_hours
+2        03 April 2026             14.50
+1        02 April 2026             14.50
+162  14 September 2026             13.00
+25       26 April 2026             10.15
+133     16 August 2026             10.00
+May 24 row:
+          date  productive_hours  productive_no_test_hours  test_hours
+52  2026-05-24              17.0                       0.0        17.0
+May 24 is now correctly excluded from the Productive Days ranking.
 
+Activity Statistics Verified
+Study: 478.9h all-time | 167.0h last 30 days | 25-day max streak
+Revision: 78.8h all-time | 7.0h last 30 days | 10-day max streak
+Test: 18.8h all-time | 1-day max streak
+All 3 Combined: 576.4h all-time | 174.0h last 30 days | 39-day max streak
 
-
-
-
-
-
-create a daily tracker using python for my routine. For a day with date and time in Indian standard time, there are predefined box (office, revision, testpaper revision, coaching, test, wfh, study, dinner, lunch, breakfast etc). there is search menu for searching for these predefined boxes and if it is not there you can create it and can use it from next time. within these box there are further predefined sub-boxes open up if you select them like for study, there are custom subboxes which require subject, chapter no and duration of study. similarly entertainment contain predefined sub-boxes of movie (which further contain sub box of outside and room), sports, cricket match, went outside. similarly for social media, there are custom boxes for insta and youtube (which further contain subbox of study and random videos). for each boxes at the last subbox or box, there is duration box is present for all using which we track how much time i have spend for that activity. there is option of time input too in form of 12 hour format AM/PM dropdown(PM by default). the time duration if given by user, should be in decimal or integer and have dropdown of hr and min (hr by default). it also contain the option of predefined swiggy/zomato/outside box which has subbox of price only for tracking money spend. Similarly there is also boxof uber/ola/rapido which also contain only price. similarly for friend split with custom activity. It also contain monthly calender with date and also yearly calender in which all the month with date appear. for these month and year calender each date  is indicated by colors like red, black, green, golden, yellow based on the time spend for study. if less than 1 hr study= black, red=for weekend <5hr and for  weekday <3hr, yellow = for weekend <8hr and weekday <6hr, green= for weekday <8hr and for weekend <14 hr and golden= for weekday <11.5hr and for weekend <17.5hr. this month and yearly activity is directly connected with daily input and update automatically as we save a day activity. the weekend and weekday is depend on the condition of if that day any boxes of office, wfh, test or coaching is there. test day is marked with pink color. also using the input of dates by user, prepare the tabular targets, deadline and time taken to complete the subject and its chapters, test paper revision. revision completed, etc. also there is target page where we can write the daily, custom days, weekly, fortnightly, monthly and custom months targets which is later match with the target meet or achieved and provide us the analysis using tabular and graphically. also it give the weekly, monthly and yearly expense analysis.
-
-use groq api key for ai related interpretation if required and use database for storing all these data. beautify the UI for it
+CF Ratings: Automatically assigned based on the productivity score:
+0% - 40%: Developing
+40% - 60%: Consistent
+60% - 75%: Specialist
+75% - 85%: Expert
+85% - 95%: Master
+95% - 100%: Grandmaster
+Good Days (Last 30d) Card: Highlights total good days, percentage, and criteria badge.
+Daily Performance Report Table: Displays Productivity (%) and Waste (%) as progress columns, accompanied by CF Rating and Good Day? (✅ / ❌)

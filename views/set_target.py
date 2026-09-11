@@ -71,7 +71,8 @@ def render(USER, USER_CONFIG):
     
     st.divider()
     tgt_df = read_sql("SELECT * FROM targets WHERE username=%s", (USER,))
-    act_df = read_sql("SELECT * FROM activities WHERE username=%s AND type IN ('Study', 'Study during trip', 'Revision', 'Test')", (USER,))
+    _all_act_df = get_activities_df(USER)
+    act_df = _all_act_df[_all_act_df['type'].isin(['Study', 'Study during trip', 'Revision', 'Test'])].copy() if not _all_act_df.empty else pd.DataFrame()
     if not act_df.empty:
         if 'start_time' not in act_df.columns: act_df['start_time'] = None
         act_df['start_time'] = act_df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
@@ -115,46 +116,75 @@ def render(USER, USER_CONFIG):
                     return sub
             return sub
 
-        for _, t in tgt_df.iterrows():
+        def _compute_target_progress(t, act_df):
             sub = t['subject']
-            disp_sub = _get_target_display_name(t, tgt_df)
+            goal_unit = t.get('goal_unit', 'Chapters') or 'Chapters'
+            total = int(t['total_chapters']) if (pd.notna(t.get('total_chapters')) and t['total_chapters']) else 0
             _tgt_start_date = t.get('start_time') or ''
             effective_start = _tgt_start_date if (_tgt_start_date and str(_tgt_start_date).strip().lower() not in ('none', 'nan', 'null')) else t.get('date_created', '')
             resolved_sub = _resolve_subject(sub, t.get('date_created'))
-            sub_acts = act_df[act_df['subject'] == resolved_sub].copy()
-            if effective_start:
+            
+            sub_acts = act_df[act_df['subject'] == resolved_sub].copy() if not act_df.empty else pd.DataFrame()
+            if not sub_acts.empty and effective_start:
                 sub_acts['_date'] = pd.to_datetime(sub_acts['date']).dt.date
                 sub_acts = sub_acts[sub_acts['_date'] >= pd.to_datetime(effective_start).date()]
-            hours_taken = round(sub_acts['duration'].sum(), 2)
-            days_taken  = sub_acts['date'].nunique()
-            # Use clean chapter names to count unique chapters
-            valid_items = [get_clean_chapter(ch) for ch in sub_acts['chapter'].unique()]
-            goal_unit = t.get('goal_unit', 'Chapters') or 'Chapters'
+                
+            hours_taken = round(sub_acts['duration'].sum(), 2) if not sub_acts.empty else 0.0
+            days_taken  = sub_acts['date'].nunique() if not sub_acts.empty else 0
             
-            # Refined filter: if goal is Chapters/Topics, count non-empty unique entries
-            # but still filter out entries that are explicitly Pages or Questions
-            valid_items = [
-                ch for ch in valid_items 
-                if ch and str(ch).strip() and not (
-                    goal_unit in ["Chapters", "Topics / Units"] and 
-                    is_numeric_entry(ch) and 
-                    (str(ch).lower().startswith('pages:') or str(ch).lower().startswith('pg:') or str(ch).lower().startswith('q:'))
-                )
-            ]
-            done  = len(valid_items)
-            total = t['total_chapters']
-            goal_unit = t.get('goal_unit', 'Chapters') or 'Chapters'
+            _ITEM_TYPES  = {"Chapters", "Topics / Units", "Custom", "Pomodoros"}
+            _CUMUL_TYPES = {"Pages", "Questions Solved", "Problems"}
+            _HOURS_TYPE  = "Hours"
+            
+            if sub_acts.empty:
+                done = 0
+            elif goal_unit == _HOURS_TYPE:
+                done = hours_taken
+            elif goal_unit in _CUMUL_TYPES:
+                done = sum(n for n in ((parse_numeric(ch) for ch in sub_acts['chapter'])) if n is not None)
+            else:
+                valid_items = [get_clean_chapter(ch) for ch in sub_acts['chapter'].unique()]
+                valid_items = [
+                    ch for ch in valid_items 
+                    if ch and str(ch).strip() and not (
+                        goal_unit in ["Chapters", "Topics / Units"] and 
+                        is_numeric_entry(ch) and 
+                        (str(ch).lower().startswith('pages:') or str(ch).lower().startswith('pg:') or str(ch).lower().startswith('q:'))
+                    )
+                ]
+                done = len(valid_items)
+                
             percent = round(min((done / total) * 100, 100), 1) if total > 0 else (0 if done == 0 else 100)
+            is_achieved = (percent >= 100) if total > 0 else (done > 0)
+            
+            return {
+                "done": done,
+                "total": total,
+                "percent": percent,
+                "is_achieved": is_achieved,
+                "hours_taken": hours_taken,
+                "days_taken": days_taken,
+                "effective_start": effective_start,
+                "goal_unit": goal_unit,
+                "resolved_sub": resolved_sub,
+                "sub_acts": sub_acts
+            }
+
+        for _, t in tgt_df.iterrows():
+            disp_sub = _get_target_display_name(t, tgt_df)
+            prog = _compute_target_progress(t, act_df)
+            status_icon = "✅" if prog["is_achieved"] else "❌"
             display_data.append({
+                "Status":          status_icon,
                 "Subject":         disp_sub,
-                "Goal Type":       goal_unit,
-                f"Goal ({goal_unit})": total,
-                f"Done ({goal_unit})": done,
-                "Achieved %":      f"{percent}%",
-                "Start Date":      effective_start,
+                "Goal Type":       prog["goal_unit"],
+                f"Goal ({prog['goal_unit']})": prog["total"],
+                f"Done ({prog['goal_unit']})": prog["done"],
+                "Achieved %":      f"{prog['percent']}%",
+                "Set Date":        prog["effective_start"],
                 "Deadline":        t['deadline'],
-                "Days Studied":    days_taken,
-                "Hours Logged":    hours_taken,
+                "Days Studied":    prog["days_taken"],
+                "Hours Logged":    prog["hours_taken"],
             })
         st.dataframe(pd.DataFrame(display_data), width='stretch')
         
@@ -192,7 +222,7 @@ def render(USER, USER_CONFIG):
                     fig_g = go.Figure(go.Indicator(
                         mode = "gauge+number",
                         value = p_val,
-                        title = {'text': row['Subject'], 'font': {'size': 14}},
+                        title = {'text': f"{row['Subject']}<br><span style='font-size:11px;color:#94a3b8;'>Set: {row['Set Date']} | Due: {row['Deadline']}</span>", 'font': {'size': 13}},
                         number = {'suffix': "%", 'font': {'size': 16}},
                         gauge = {
                             'axis': {'range': [0, 100], 'tickwidth': 1},
@@ -232,8 +262,8 @@ def render(USER, USER_CONFIG):
                 "Not Started": len(display_df[display_df['Days Studied'] == 0])
             }
             fig_status = px.pie(values=list(status_data.values()), names=list(status_data.keys()),
-                              color_discrete_map={'Completed':'#22c55e', 'In Progress':'#3b82f6', 'Not Started':'#ef4444'},
-                              title="Target Status Distribution")
+                               color_discrete_map={'Completed':'#22c55e', 'In Progress':'#3b82f6', 'Not Started':'#ef4444'},
+                               title="Target Status Distribution")
             st.plotly_chart(fig_status, width='stretch', key="target_status_pie")
         
         # Time efficiency analysis
@@ -250,9 +280,13 @@ def render(USER, USER_CONFIG):
                 
                 if pd.notna(done_val) and done_val > 0:
                     efficiency = hours / done_val
+                    is_achieved = (row['Status'] == "✅")
                     hours_to_goals.append({
+                        'Status': '✅' if is_achieved else '❌',
                         'Subject': row['Subject'],
                         'Goal Type': goal_unit,
+                        'Set Date': row['Set Date'],
+                        'Deadline': row['Deadline'],
                         'Chapters Done': done_val,
                         'Total Hours': hours,
                         'Hours per Chapter': round(efficiency, 2)
@@ -260,25 +294,24 @@ def render(USER, USER_CONFIG):
         
         if hours_to_goals:
             eff_df = pd.DataFrame(hours_to_goals)
-            st.dataframe(eff_df, hide_index=True, width='stretch')
+            st.dataframe(eff_df, width='stretch')
         
         st.divider()
         
         # Show detailed target progress data
-        st.markdown("### 📊 Target Progress Data (Set Date → Achievement Date)")
+        st.markdown("### 📊 Target Progress Data (From Set Date)")
         for _, t in tgt_df.iterrows():
             sub = t['subject']
-            # Get dates from target
-            today = get_ist_now().date()
-            set_date = pd.to_datetime(t.get('set_date', t['deadline'])).date() if 'set_date' in t and pd.notna(t.get('set_date')) else (today - timedelta(days=365))
-            achieve_date = pd.to_datetime(t.get('achieve_date', today)).date() if 'achieve_date' in t and pd.notna(t.get('achieve_date')) else today
+            disp_sub = _get_target_display_name(t, tgt_df)
+            prog = _compute_target_progress(t, act_df)
             
-            # Filter activities between set_date and achieve_date
-            sub_acts = act_df[(act_df['subject'] == sub) & 
-                              (pd.to_datetime(act_df['date']).dt.date >= set_date) & 
-                              (pd.to_datetime(act_df['date']).dt.date <= achieve_date)]
+            effective_start = prog['effective_start']
+            sub_acts = prog['sub_acts']
             
-            with st.expander(f"📈 {sub} - {set_date} to {achieve_date}"):
+            tick_prefix = "✅ " if prog["is_achieved"] else ""
+            expander_title = f"📈 {tick_prefix}{disp_sub} — Set Date: {effective_start} | Deadline: {t.get('deadline', 'N/A')}"
+            
+            with st.expander(expander_title):
                 if not sub_acts.empty:
                     # Summary stats
                     total_hours = round(sub_acts['duration'].sum(), 2)
@@ -294,22 +327,26 @@ def render(USER, USER_CONFIG):
                     with col2:
                         st.metric("Days Studied", days_studied)
                     with col3:
-                        st.metric("Chapters", chapters_covered)
+                        st.metric("Chapters Covered", chapters_covered)
                     
                     # Detailed table
                     st.write("**Detailed Activity Log:**")
-                    detail_data = sub_acts[['date', 'type', 'chapter', 'duration', 'amount']].copy()
+                    detail_cols = [c for c in ['date', 'type', 'chapter', 'duration', 'amount'] if c in sub_acts.columns]
+                    detail_data = sub_acts[detail_cols].copy()
                     detail_data = detail_data.sort_values('date', ascending=False)
                     st.dataframe(detail_data, width='stretch')
                 else:
-                    st.info(f"No activities logged for {sub} between {set_date} and {achieve_date}.")
+                    st.info(f"No activities logged for {disp_sub} on or after Set Date ({effective_start}).")
     
         st.divider()
         # ════════════════════════════════════════════════════════
         # SECTION: DELETE TARGET
         # ════════════════════════════════════════════════════════
         st.subheader("🗑️ Delete a Target")
-        del_options = {t['id']: f"{_get_target_display_name(t, tgt_df)} (ID: #{t['id']}, Goal: {t['total_chapters']} {t.get('goal_unit', 'Chapters')})" for _, t in tgt_df.iterrows()}
+        del_options = {
+            t['id']: f"{_get_target_display_name(t, tgt_df)} (ID: #{t['id']}, Goal: {t['total_chapters']} {t.get('goal_unit', 'Chapters')}, Set Date: {_compute_target_progress(t, act_df)['effective_start']}, Deadline: {t.get('deadline', 'N/A')})"
+            for _, t in tgt_df.iterrows()
+        }
         del_id = st.selectbox(
             "Select target to delete",
             options=list(del_options.keys()),

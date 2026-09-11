@@ -12,9 +12,9 @@ study_subjects = [
 
 ent_types = ["Movie","Sports","friendMeetup"]
 movie_modes = ["Room","Outside"]
-social_platform = ["SocialMediaHopping (Loneliness - Good)", "Instagram", "YouTube", "Snapchat", "LinkedIn", "Twitter", "WhatsApp", "Other"]
+social_platform = ["SocialMediaHop", "Instagram", "YouTube", "Snapchat", "LinkedIn", "Twitter", "WhatsApp", "Other"]
 talkoncall_withwhom = ["Bestie", "Parent", "Friend", "Other"]
-content_type = ["Stories/Chat"]
+content_type = ["Shorts", "Video", "Chat", "Other"]
 food_sources = ["Swiggy","Zomato","Outside"]
 transport_services = ["Uber","Ola","Rapido"]
 overthinking_triggers = [
@@ -108,55 +108,47 @@ def completion_percent(total, done):
 
 def productivity_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None, sleep_intervals_dict=None):
     """
-    Calculate productivity percentage. 
-    Formula: (productive_hours / available_hours) * 100
-    Where: available_hours = SUM(day_limit) - total_sleep_hours - total_essential_hours
-    For past days, day_limit = 24. For current day, day_limit = time passed till now.
+    Calculate productivity percentage across dataframe dates using new formula:
+    Productivity % = productive_hours / (productive_hours + waste_hours) * 100
+    Where waste_hours for each day = max(0, day_limit - sleep - essential - productive).
     """
     if df.empty: 
-        return 0
+        return 0.0
     
-    # Current time info (IST)
-    now = get_ist_now()
-    today_str = now.strftime('%Y-%m-%d')
-    current_hour = now.hour + now.minute / 60.0
+    rep = daily_report(df, sleep_data=sleep_hours, powernap_data=powernap_hours, sleep_intervals_dict=sleep_intervals_dict)
+    if rep.empty:
+        return 0.0
     
-    # Calculate adjusted totals by date to handle sleep overlap properly
-    total_productive, total_essential, _ = get_adjusted_sums(df, sleep_intervals_dict)
+    tot_prod = rep['productive_hours'].sum()
+    tot_waste = rep['waste_hours'].sum()
+    pw_total = tot_prod + tot_waste
+    if pw_total <= 0:
+        return 0.0
+    
+    return round((tot_prod / pw_total) * 100, 2)
 
-    # Get unique dates in the dataframe
-    unique_dates = pd.to_datetime(df['date']).unique()
-    
-    total_day_limit = 0
-    total_sleep_hours = 0
-    
-    for date in unique_dates:
-        if hasattr(date, 'date'): date_str = str(date.date())
-        elif isinstance(date, str): date_str = date
-        else: date_str = str(date)[:10]
-        
-        # Determine day limit
-        if date_str == today_str:
-            day_limit = current_hour
-        else:
-            day_limit = 24.0
-        
-        total_day_limit += day_limit
-        
-        # Calculate sleep hours for this date
-        if sleep_hours is not None:
-            if isinstance(sleep_hours, dict):
-                total_sleep_hours += sleep_hours.get(date_str, 0)
-            elif isinstance(sleep_hours, (int, float)):
-                total_sleep_hours += sleep_hours
 
-    # available_hours = (total_day_limit - sleep - essential)
-    available_hours = total_day_limit - total_sleep_hours - total_essential
+def overall_score(df: pd.DataFrame, sleep_hours=None, powernap_hours=None, sleep_intervals_dict=None):
+    """
+    Calculate overall percentage across dataframe dates:
+    Overall % = (productive_hours + essential_hours) / (productive_hours + waste_hours + essential_hours) * 100
+    """
+    if df.empty: 
+        return 0.0
     
-    if available_hours <= 0:
-        return 0
+    rep = daily_report(df, sleep_data=sleep_hours, powernap_data=powernap_hours, sleep_intervals_dict=sleep_intervals_dict)
+    if rep.empty:
+        return 0.0
     
-    return round((total_productive / available_hours) * 100, 2)
+    tot_prod = rep['productive_hours'].sum()
+    tot_waste = rep['waste_hours'].sum()
+    tot_essential = rep['essential_hours'].sum() if 'essential_hours' in rep.columns else 0.0
+    pwe_total = tot_prod + tot_waste + tot_essential
+    if pwe_total <= 0:
+        return 0.0
+    
+    return round(((tot_prod + tot_essential) / pwe_total) * 100, 2)
+
 
 
 def streak(df: pd.DataFrame):
@@ -220,6 +212,11 @@ def daily_report(df, sleep_data=None, powernap_data=None, sleep_intervals_dict=N
         # Use helper for adjusted sums
         productive, essential, waste_logged = get_adjusted_sums(g, {date_str: intervals})
         
+        # Test hours calculation
+        g_test = g[g['type'].astype(str).str.strip().str.lower() == 'test']
+        test_hours, _, _ = get_adjusted_sums(g_test, {date_str: intervals}) if not g_test.empty else (0.0, 0.0, 0.0)
+        productive_no_test = max(0.0, productive - test_hours)
+        
         # Get sleep and powernap hours
         sleep_hours = sleep_data.get(date_str, 0)
         powernap_hours = powernap_data.get(date_str, 0)
@@ -227,25 +224,56 @@ def daily_report(df, sleep_data=None, powernap_data=None, sleep_intervals_dict=N
         # Determine day limit: current hour if today, else 24
         day_limit = current_hour if date_str == today_str else 24.0
         
-        # Previous logic for scores: available = day_limit - sleep - essential
-        available_for_score = day_limit - sleep_hours - essential
-        
         # New logic for waste hours: (day_limit - sleep - essential - productive)
         waste = max(0, day_limit - sleep_hours - essential - productive)
         
-        # Calculate productivity score
-        if available_for_score > 0:
-            score = round((productive / available_for_score) * 100, 2)
-            waste_score = round((waste / available_for_score) * 100, 2)
+        # Productivity %: productive / (productive + waste)
+        pw_total = productive + waste
+        score = round((productive / pw_total) * 100, 2) if pw_total > 0 else 0.0
+        waste_score = round((waste / pw_total) * 100, 2) if pw_total > 0 else 0.0
+
+        # Overall %: (productive + essential) / (productive + waste + essential)
+        pwe_total = productive + waste + essential
+        overall_pct = round(((productive + essential) / pwe_total) * 100, 2) if pwe_total > 0 else 0.0
+
+        # Good Day check: productive > 50% of awake hours (day_limit - sleep)
+        # Current day is ongoing, so good day status is not finalized yet
+        awake_hours = max(0, day_limit - sleep_hours)
+        if date_str == today_str:
+            is_good_day = None
         else:
-            score = 0
-            waste_score = 0
+            is_good_day = productive > (0.5 * awake_hours) if awake_hours > 0 else False
+
+        # CF-style rating based on productivity_% (strictly for completed days)
+        if date_str == today_str:
+            cf_rating = "—"
+        else:
+            _pct_tiers = [
+                (0,  40,  "Developing"),
+                (40, 60,  "Consistent"),
+                (60, 75,  "Specialist"),
+                (75, 85,  "Expert"),
+                (85, 95,  "Master"),
+                (95, 100, "Grandmaster"),
+            ]
+            cf_rating = _pct_tiers[0][2]
+            for _lo, _hi, _name in _pct_tiers:
+                if _lo <= score <= _hi:
+                    cf_rating = _name
+                    break
+            if score > 100:
+                cf_rating = "Grandmaster"
 
         report.append({
             "date": d,
             "productivity_%": score,
+            "overall_%": overall_pct,
             "waste_%": waste_score,
+            "is_good_day": is_good_day,
+            "cf_rating": cf_rating,
             "productive_hours": round(productive, 2),
+            "productive_no_test_hours": round(productive_no_test, 2),
+            "test_hours": round(test_hours, 2),
             "waste_hours": round(waste, 2),
             "essential_hours": round(essential, 2),
             "sleep_hours": round(sleep_hours, 2),
@@ -762,12 +790,9 @@ def calculate_top_streaks(df: pd.DataFrame, year=None, month=None):
             'length': current_streak
         })
 
-    # Sort streaks by length descending and take top 10
-    streaks.sort(key=lambda x: x['length'], reverse=True)
+    # Sort streaks by length descending (and end_date descending as tie-breaker) and take top 10
+    streaks.sort(key=lambda x: (x['length'], x['end_date']), reverse=True)
     top_streaks = streaks[:10]
-    
-    # Sort the top 10 by end_date descending (latest first)
-    top_streaks.sort(key=lambda x: x['end_date'], reverse=True)
     return top_streaks
 
 
@@ -854,8 +879,7 @@ def get_top_study_days(df: pd.DataFrame, year=None, month=None, is_weekend=None)
 
     report_df = pd.DataFrame(results)
     if not report_df.empty:
-        report_df = report_df.sort_values('hours', ascending=False).head(10)
-        report_df = report_df.sort_values('date', ascending=False)
+        report_df = report_df.sort_values(['hours', 'date'], ascending=[False, False]).head(10)
     
     return report_df
 
@@ -948,15 +972,26 @@ def sub_activity_trend(df, main_activity, sleep_intervals_dict=None):
 # ════════════════════════════════════════════════════════════════════════
 from smart_tips import generate_smart_work_tips, render_smart_work_section
 
-def get_top_periods(daily_df, period_type, category):
+def get_top_periods(daily_df, period_type, category, exclude_test=None):
     """
     Returns the top 10 periods (Day, Week, Month, Year) for a given category (productive, waste).
     Takes in a daily_df (output of daily_report).
+    If category == 'productive' and exclude_test is True (default for 'Day'), test hours are excluded.
     """
     if daily_df.empty:
         return pd.DataFrame()
 
+    if exclude_test is None:
+        exclude_test = (period_type == 'Day' and category == 'productive')
+
     df = daily_df.copy()
+    
+    if category == 'productive' and exclude_test:
+        if 'productive_no_test_hours' in df.columns:
+            df['productive_hours'] = df['productive_no_test_hours']
+        elif 'test_hours' in df.columns:
+            df['productive_hours'] = (df['productive_hours'] - df['test_hours']).clip(lower=0)
+
     df['date_obj'] = pd.to_datetime(df['date'])
     
     if period_type == 'Day':
@@ -1010,4 +1045,120 @@ def get_top_streaks(daily_df, category):
     
     top_10 = streak_counts.nlargest(10, 'Days')[['Period', 'Days']]
     return top_10
+
+
+def check_subject_target_celebration(user, entered_subject, entry_date):
+    """
+    Check if a target celebration popper should be shown for the entered subject.
+    Rule: Show popper ONLY when entering an entry for a subject that has a target set,
+    and that target is achieved (100% completed), for up to 1 day after target completion
+    OR until a new target is set for that subject.
+    """
+    if not entered_subject or not str(entered_subject).strip():
+        return None
+
+    clean_sub = str(entered_subject).strip()
+
+    try:
+        from utils import read_sql
+        import datetime as dt_mod
+
+        tgt_df = read_sql("SELECT * FROM targets WHERE username=%s", (user,))
+        if tgt_df.empty:
+            return None
+
+        act_df = read_sql(
+            "SELECT date, type, subject, chapter, duration FROM activities WHERE username=%s AND type IN ('Study','Study during trip','Revision','Test') AND COALESCE(status,'Completed') != 'Draft'",
+            (user,)
+        )
+    except Exception:
+        return None
+
+    def _sub_match(s1, s2):
+        c1 = str(s1 or '').strip().lower()
+        c2 = str(s2 or '').strip().lower()
+        if c1 == c2:
+            return True
+        ir_names = {'ir', 'mpuri-ir', 'international relations', 'international relation'}
+        if c1 in ir_names and c2 in ir_names:
+            return True
+        return False
+
+    matching_targets = []
+    for _, row in tgt_df.iterrows():
+        if _sub_match(row.get('subject'), clean_sub):
+            matching_targets.append(row)
+
+    if not matching_targets:
+        return None
+
+    # Sort matching targets by ID ascending to pick the latest target set for this subject
+    matching_targets.sort(key=lambda x: int(x.get('id', 0)))
+    latest_target = matching_targets[-1]
+
+    t_sub = str(latest_target.get('subject', ''))
+    t_total = int(latest_target.get('total_chapters', 0))
+    if t_total <= 0:
+        return None
+
+    goal_unit = str(latest_target.get('goal_unit', 'Chapters'))
+    effective_start = latest_target.get('start_time') or latest_target.get('date_created', '')
+
+    # Filter activities for this target subject
+    sub_acts = pd.DataFrame()
+    if not act_df.empty:
+        sub_acts = act_df[act_df['subject'].apply(lambda s: _sub_match(s, clean_sub))].copy()
+        if effective_start and str(effective_start).strip().lower() not in ('none', 'nan', 'null', ''):
+            try:
+                start_date_obj = pd.to_datetime(effective_start).date()
+                sub_acts['_date'] = pd.to_datetime(sub_acts['date']).dt.date
+                sub_acts = sub_acts[sub_acts['_date'] >= start_date_obj]
+            except Exception:
+                pass
+
+    if sub_acts.empty:
+        return None
+
+    sub_acts['clean_ch'] = sub_acts['chapter'].apply(get_clean_chapter)
+
+    if goal_unit in ("Hours",):
+        done = float(sub_acts['duration'].sum())
+    else:
+        valid_items = [ch for ch in sub_acts['clean_ch'].unique() if ch and str(ch).strip()]
+        done = float(len(valid_items))
+
+    percent = (done / t_total) * 100.0 if t_total > 0 else 0.0
+
+    if percent >= 100.0:
+        # Determine completion date from activities
+        try:
+            dates = pd.to_datetime(sub_acts['date']).dt.date
+            comp_date = dates.max()
+        except Exception:
+            comp_date = None
+
+        if comp_date is None:
+            try:
+                comp_date = pd.to_datetime(effective_start).date()
+            except Exception:
+                comp_date = dt_mod.date.today()
+
+        # Parse entry_date
+        if isinstance(entry_date, dt_mod.date):
+            entry_date_obj = entry_date
+        elif isinstance(entry_date, str):
+            try:
+                entry_date_obj = pd.to_datetime(entry_date).date()
+            except Exception:
+                entry_date_obj = dt_mod.date.today()
+        else:
+            entry_date_obj = dt_mod.date.today()
+
+        days_diff = (entry_date_obj - comp_date).days
+        # "for next 1 day": entry date is within 1 day of target completion date (-1 <= days_diff <= 1)
+        if -1 <= days_diff <= 1:
+            return t_sub
+
+    return None
+
 

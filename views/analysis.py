@@ -7,6 +7,7 @@ from logic import *
 import database
 from smart_tips import generate_smart_work_tips, render_smart_work_section
 import proposal
+import cf_visuals
 
 def render(USER, USER_CONFIG):
     import plotly.express as px
@@ -21,14 +22,18 @@ def render(USER, USER_CONFIG):
         if 'start_time' not in df.columns: df['start_time'] = None
         df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
         df['chapter'] = df['chapter'].apply(get_clean_chapter)
+        # Guard: Filter out any future dates beyond today across analysis
+        today_date = get_ist_now().date()
+        df = df[pd.to_datetime(df['date']).dt.date <= today_date].copy()
     
     # Dynamically build PRODUCTIVE and ESSENTIAL from custom activities
     try:
-        cb_df = read_sql("SELECT name, activity_type FROM custom_boxes WHERE username=%s", (USER,))
-        custom_productive = cb_df[cb_df['activity_type'] == 'Productive']['name'].tolist()
-        custom_essential  = cb_df[cb_df['activity_type'] == 'Essential']['name'].tolist()
+        cb_df = get_custom_boxes(USER)
+        custom_productive = cb_df[cb_df['activity_type'] == 'Productive']['name'].tolist() if not cb_df.empty else []
+        custom_essential  = cb_df[cb_df['activity_type'] == 'Essential']['name'].tolist() if not cb_df.empty else []
     except:
         custom_productive, custom_essential = [], []
+
     
     ALL_PRODUCTIVE = [a for a in (PRODUCTIVE_TYPES + custom_productive) if a != "UPSC App"]
     ALL_ESSENTIAL  = [a for a in (ESSENTIAL_TYPES + custom_essential) if a != "UPSC App"]
@@ -37,16 +42,223 @@ def render(USER, USER_CONFIG):
     try:
         ALL_NEUTRAL = NEUTRAL_TYPES
     except NameError:
-        ALL_NEUTRAL = ["Sleep", "Powernap", "Napping"]
+        ALL_NEUTRAL = []  # Powernap/Napping are Essential, not Neutral
+
     
-    tab_daily, tab_monthly, tab_yearly = st.tabs([
+    # Pre-calculate df_daily so it is available across all tabs and at bottom
+    cutoff_date = (get_ist_now().date() - timedelta(days=60)).strftime('%Y-%m-%d')
+    df_daily = df[df['date'] >= cutoff_date].copy() if not df.empty else df.copy()
+
+    tab_cf, tab_daily, tab_monthly, tab_yearly = st.tabs([
+        "🔥 Activity Heatmaps & Performance",
         "📅 Daily Productivity Analysis",
         "📆 Monthly Productivity Analysis",
         "📈 Yearly Productivity Analysis"
     ])
-    
+
     # ════════════════════════════════════════════
-    # TAB 1 — DAILY
+    # TAB 1 — PERFORMANCE GRAPH & ACTIVITY HEATMAPS
+    # ════════════════════════════════════════════
+    with tab_cf:
+        st.subheader("🔥 Activity Productivity Heatmaps & Performance")
+        st.caption("Codeforces-style performance timeline graphs and activity contribution heatmaps for Study, Revision, and Test activities.")
+
+        if df.empty:
+            st.info("No activity data found.")
+        else:
+            # Controls row
+            cf_col1, cf_col2, cf_col3 = st.columns([1.2, 1.2, 1.6])
+            
+            with cf_col1:
+                cf_act = st.selectbox(
+                    "Activity Filter",
+                    ["Study", "All 3 Combined", "Revision", "Test", "Walk/Exercise", "📑 Stacked View (All Activities)"],
+                    index=0,
+                    key="cf_act_sel"
+                )
+            
+            with cf_col2:
+                # Available years
+                df_temp = df.copy()
+                df_temp['year_val'] = pd.to_datetime(df_temp['date']).dt.year
+                avail_years = sorted(list(df_temp['year_val'].dropna().unique()), reverse=True)
+                year_options = ["Last 365 Days"] + [str(int(y)) for y in avail_years]
+                cf_year = st.selectbox(
+                    "Choose Year",
+                    year_options,
+                    index=0,
+                    key="cf_year_sel"
+                )
+
+            with cf_col3:
+                graph_metric = st.selectbox(
+                    "Performance Graph Metric",
+                    [
+                        "⏱️ Productive Hours (Excl. Test)",
+                        "⏱️ Total Productive Hours",
+                        "📚 Study Hours",
+                        "🔄 Revision Hours",
+                        "📝 Test Hours",
+                        "🚶‍♂️ Walk/Exercise Hours",
+                        "🎯 Productivity Score (%)",
+                        "🌐 Overall Score (%)",
+                        "🧠 Focus Score (%)",
+                        "😴 Sleep Hours"
+                    ],
+                    index=0,
+                    key="cf_graph_metric_sel"
+                )
+
+            st.divider()
+
+            # --- 1. PERFORMANCE GRAPH ---
+            st.markdown("#### 📈 Codeforces-Style Performance Timeline")
+            st.caption("Timeline plotted against time in hours and routine scores with performance tiers and peak highlight.")
+            
+            # Prepare daily report with individual activity breakdown
+            try:
+                hl_all = read_sql("SELECT date, sleep_time, wakeup_time, powernap FROM health_logs WHERE username=%s ORDER BY date ASC", (USER,))
+                all_sleep_dict = {}
+                all_int_dict = {}
+                all_pn_dict = {}
+                if not hl_all.empty:
+                    hl_m = {str(r['date']): r for _, r in hl_all.iterrows()}
+                    for date_str in sorted(hl_m.keys()):
+                        curr = hl_m[date_str]
+                        prev_date = (pd.to_datetime(date_str) - timedelta(days=1)).strftime('%Y-%m-%d')
+                        prev = hl_m.get(prev_date, {})
+                        sleep_a = calculate_sleep_hours(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        sleep_b = 99.0
+                        s_curr = curr.get('sleep_time', '')
+                        if s_curr and "AM" in str(s_curr).upper():
+                            sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
+                        all_sleep_dict[date_str] = min(sleep_a, sleep_b)
+                        all_pn_dict[date_str] = curr.get('powernap', 0)
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str.upper():
+                            _raw_ints = [(s, e) for s, e in _raw_ints if s < 12.0]
+                        all_int_dict[date_str] = _raw_ints
+            except:
+                all_sleep_dict, all_int_dict, all_pn_dict = {}, {}, {}
+
+            all_time_rep = daily_report(df, sleep_data=all_sleep_dict, powernap_data=all_pn_dict, sleep_intervals_dict=all_int_dict)
+            
+            if not all_time_rep.empty:
+                # Merge individual activity hours per day
+                study_act = df[df['type'].isin(['Study', 'Study during trip'])].groupby('date')['duration'].sum()
+                rev_act   = df[df['type'] == 'Revision'].groupby('date')['duration'].sum()
+                test_act  = df[df['type'].isin(['Test', 'test'])].groupby('date')['duration'].sum()
+                walk_act  = df[df['type'].isin(['Walk/Exercise', 'Walk', 'Exercise'])].groupby('date')['duration'].sum()
+                
+                all_time_rep['study_hours'] = all_time_rep['date'].map(study_act).fillna(0).round(2)
+                all_time_rep['revision_hours'] = all_time_rep['date'].map(rev_act).fillna(0).round(2)
+                if 'test_hours' not in all_time_rep.columns:
+                    all_time_rep['test_hours'] = all_time_rep['date'].map(test_act).fillna(0).round(2)
+                all_time_rep['walk_hours'] = all_time_rep['date'].map(walk_act).fillna(0).round(2)
+                if 'productive_no_test_hours' not in all_time_rep.columns:
+                    all_time_rep['productive_no_test_hours'] = (all_time_rep['productive_hours'] - all_time_rep['test_hours']).clip(lower=0).round(2)
+
+                # Focus score per day
+                focus_map = {}
+                for d_val, g_val in df.groupby('date'):
+                    focus_map[d_val] = focus_score(g_val)
+                all_time_rep['focus_score'] = all_time_rep['date'].map(focus_map).fillna(0).round(1)
+
+                # Filter by year if selected
+                graph_df = all_time_rep.copy()
+                if cf_year != "Last 365 Days":
+                    try:
+                        yr_int = int(cf_year)
+                        graph_df = graph_df[pd.to_datetime(graph_df['date']).dt.year == yr_int]
+                    except:
+                        pass
+                else:
+                    cutoff_365 = (get_ist_now().date() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    graph_df = graph_df[graph_df['date'] >= cutoff_365]
+
+                # Map chosen metric
+                metric_col_map = {
+                    "⏱️ Productive Hours (Excl. Test)": ("productive_no_test_hours", "Productive Hours (Excl. Test)"),
+                    "⏱️ Total Productive Hours": ("productive_hours", "Total Productive Hours"),
+                    "📚 Study Hours": ("study_hours", "Study Hours"),
+                    "🔄 Revision Hours": ("revision_hours", "Revision Hours"),
+                    "📝 Test Hours": ("test_hours", "Test Hours"),
+                    "🚶‍♂️ Walk/Exercise Hours": ("walk_hours", "Walk/Exercise Hours"),
+                    "🎯 Productivity Score (%)": ("productivity_%", "Productivity Score"),
+                    "🌐 Overall Score (%)": ("overall_%", "Overall Score"),
+                    "🧠 Focus Score (%)": ("focus_score", "Focus Score"),
+                    "😴 Sleep Hours": ("sleep_hours", "Sleep Hours")
+                }
+                m_col, m_lbl = metric_col_map.get(graph_metric, ("productive_no_test_hours", "Productive Hours (Excl. Test)"))
+                
+                cf_visuals.render_codeforces_performance_graph(graph_df, metric_col=m_col, metric_label=m_lbl)
+            
+            st.divider()
+
+            # --- 2. PRODUCTIVITY HEATMAP ---
+            st.markdown("#### 🔥 Productivity Heatmaps & Streaks")
+            st.caption("Codeforces-style activity contribution heatmaps — green = Study, amber = Test, indigo = Walk/Exercise.")
+
+            # Always show Study heatmap (green, GitHub-style)
+            st.markdown("##### 📚 Study Activity Heatmap")
+            cf_visuals.render_github_codeforces_heatmap(df, activity_type="Study", year=cf_year)
+
+            st.divider()
+
+            # Always show Test heatmap (amber/orange)
+            st.markdown("##### 📝 Test Activity Heatmap")
+            cf_visuals.render_github_codeforces_heatmap(df, activity_type="Test", year=cf_year)
+
+            st.divider()
+
+            # Always show Walk/Exercise heatmap (indigo/violet)
+            st.markdown("##### 🚶‍♂️ Walk / Exercise Activity Heatmap")
+            cf_visuals.render_github_codeforces_heatmap(df, activity_type="Walk/Exercise", year=cf_year)
+
+            # Show extra heatmap only when stacked or a specific non-Study/Test/Walk type chosen
+            if cf_act in ("📑 Stacked View (All 3)", "📑 Stacked View (All Activities)"):
+                st.divider()
+                st.markdown("##### 🔄 Revision Activity Heatmap")
+                cf_visuals.render_github_codeforces_heatmap(df, activity_type="Revision", year=cf_year)
+            elif cf_act not in ("Study", "Test", "Walk/Exercise", "📑 Stacked View (All 3)", "📑 Stacked View (All Activities)"):
+                st.divider()
+                st.markdown(f"##### Activity Heatmap — {cf_act}")
+                cf_visuals.render_github_codeforces_heatmap(df, activity_type=cf_act, year=cf_year)
+
+            # --- Top Study & Walk/Exercise Streaks Tables in Tab 1 ---
+            col_stk1, col_stk2 = st.columns(2)
+            with col_stk1:
+                st.markdown("##### 🏆 Longest Study Streaks History")
+                study_only_df = df[df['type'].isin(['Study', 'Study during trip'])]
+                study_streaks = calculate_top_streaks(study_only_df)
+                if study_streaks:
+                    top_streaks_df = pd.DataFrame(study_streaks)
+                    top_streaks_df.columns = ["Start Date", "End Date", "Streak Length (Days)"]
+                    top_streaks_df['Start Date'] = pd.to_datetime(top_streaks_df['Start Date']).dt.strftime('%d %b %Y')
+                    top_streaks_df['End Date'] = pd.to_datetime(top_streaks_df['End Date']).dt.strftime('%d %b %Y')
+                    st.dataframe(top_streaks_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No study streaks recorded yet.")
+
+            with col_stk2:
+                st.markdown("##### 🏃 Longest Walk/Exercise Streaks History")
+                walk_only_df = df[df['type'].isin(['Walk/Exercise', 'Walk', 'Exercise'])]
+                walk_streaks = calculate_top_streaks(walk_only_df)
+                if walk_streaks:
+                    top_walk_df = pd.DataFrame(walk_streaks)
+                    top_walk_df.columns = ["Start Date", "End Date", "Streak Length (Days)"]
+                    top_walk_df['Start Date'] = pd.to_datetime(top_walk_df['Start Date']).dt.strftime('%d %b %Y')
+                    top_walk_df['End Date'] = pd.to_datetime(top_walk_df['End Date']).dt.strftime('%d %b %Y')
+                    st.dataframe(top_walk_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No walk/exercise streaks recorded yet.")
+
+    # ════════════════════════════════════════════
+    # TAB 2 — DAILY
     # ════════════════════════════════════════════
     with tab_daily:
         st.subheader("📅 Daily Productivity Analysis")
@@ -85,8 +297,15 @@ def render(USER, USER_CONFIG):
                         sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                         powernap_dict[date_str] = curr.get('powernap', 0)
                         
-                        # Store intervals for overlap logic
-                        sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        # Store intervals for overlap logic.
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints2 = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str2 = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str2.upper():
+                            _raw_ints2 = [(s, e) for s, e in _raw_ints2 if s < 12.0]
+                        sleep_intervals_dict[date_str] = _raw_ints2
             except:
                 sleep_hours_dict = {}
                 sleep_intervals_dict = {}
@@ -98,10 +317,42 @@ def render(USER, USER_CONFIG):
             waste_df    = df_daily[~df_daily['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
     
             # Metrics row
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Productivity %", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
-            m2.metric("Study Streak",   f"{streak(df_daily)} days")
-            m3.metric("Focus Score",    f"{focus_score(df_daily)}%")
+            num_daily_days = df_daily['date'].nunique()
+            day_text = f"{num_daily_days} Days" if num_daily_days != 1 else "1 Day"
+            daily_prod_score = productivity_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+            daily_overall_score = overall_score(df_daily, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+            daily_focus_score = focus_score(df_daily)
+            daily_streak = streak(df_daily)
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(
+                label=f"Productivity % ({day_text} Avg)",
+                value=f"{daily_prod_score}%",
+                delta="Prod ÷ (Prod + Waste)",
+                delta_color="off",
+                help=f"Productivity % = Productive ÷ (Productive + Waste). Averaged across {num_daily_days} recorded days within the 60-day window."
+            )
+            m2.metric(
+                label=f"Overall % ({day_text} Avg)",
+                value=f"{daily_overall_score}%",
+                delta="(Prod + Ess) ÷ Total",
+                delta_color="off",
+                help=f"Overall % = (Productive + Essential) ÷ (Productive + Waste + Essential). Averaged across {num_daily_days} recorded days within the 60-day window."
+            )
+            m3.metric(
+                label="Study Streak",
+                value=f"{daily_streak} days",
+                delta="Consecutive active days",
+                delta_color="off",
+                help="Current streak of consecutive days with study activity logged."
+            )
+            m4.metric(
+                label=f"Focus Score ({day_text} Avg)",
+                value=f"{daily_focus_score}%",
+                delta=f"Averaged over {num_daily_days} recorded days",
+                delta_color="off",
+                help=f"Deep work ratio (study/revision sessions ≥ 2 hours) averaged across {num_daily_days} recorded days."
+            )
     
             st.divider()
     
@@ -115,23 +366,80 @@ def render(USER, USER_CONFIG):
             _trend30_cutoff = (get_ist_now().date() - timedelta(days=29)).strftime('%Y-%m-%d')
             df_trend30 = df_daily[df_daily['date'] >= _trend30_cutoff].copy()
             
+            # ── CF-STYLE PRODUCTIVITY RATING ────────────────────────────
+            if not report_df.empty and 'productivity_%' in report_df.columns:
+                st.markdown("#### 🏅 Productivity Rating (CF-Style)")
+                st.caption("Rating based on **Productivity % = Productive ÷ (Productive + Waste)**. Good Day = productive hours > 50% of awake time.")
+                
+                # CF Performance Timeline Graph
+                _cf_daily_df = report_df.copy()
+                _cf_daily_df['date_dt'] = pd.to_datetime(_cf_daily_df['date'])
+                _cf_daily_df = _cf_daily_df.sort_values('date_dt')
+                
+                cf_visuals.render_codeforces_performance_graph(
+                    _cf_daily_df,
+                    metric_col="productivity_%",
+                    metric_label="Productivity %"
+                )
+                
+                # Good-day summary for last 30 days (strictly completed days)
+                _today_d = get_ist_now().date()
+                _last30 = _cf_daily_df[(_cf_daily_df['date'] >= _trend30_cutoff) & (_cf_daily_df['date_dt'].dt.date < _today_d)]
+                if not _last30.empty and 'is_good_day' in _last30.columns:
+                    _valid_days = _last30['is_good_day'].dropna()
+                    _good_count = int(_valid_days.sum())
+                    _total_count = len(_valid_days)
+                    _good_pct = round((_good_count / _total_count) * 100, 1) if _total_count > 0 else 0
+                    _gd_color = "#22c55e" if _good_pct >= 50 else "#ef4444"
+                    st.markdown(f"""
+<div style="display:flex;gap:24px;align-items:center;padding:12px 18px;background:#0f172a;border-radius:10px;border:1px solid #1e293b;margin:8px 0 16px 0;">
+<div>
+<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Good Days (Last 30d)</div>
+<div style="font-size:22px;font-weight:700;color:{_gd_color};margin-top:2px;">{_good_count} / {_total_count} <span style="font-size:14px;color:#94a3b8;">({_good_pct}%)</span></div>
+</div>
+<div style="width:1px;height:36px;background:#1e293b;"></div>
+<div>
+<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Good Day Criteria</div>
+<div style="font-size:13px;color:#e2e8f0;margin-top:4px;">Productive Hours &gt; 50% of (24h − Sleep)</div>
+</div>
+</div>
+                    """, unsafe_allow_html=True)
+                
+                st.divider()
+
             if not report_df.empty:
                 st.markdown("**📋 Daily Performance Report Table**")
-                # Updated table prioritizing scores
-                disp_df = report_df[['date', 'productivity_%', 'waste_%', 'productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']].copy()
+                # Build display columns — productivity and overall metrics first
+                _table_cols = ['date', 'productivity_%', 'overall_%', 'waste_%', 'cf_rating', 'is_good_day', 'productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']
+                _available_cols = [c for c in _table_cols if c in report_df.columns]
+                disp_df = report_df[_available_cols].copy()
+                
+                # Format duration columns
                 for c in ['productive_hours', 'waste_hours', 'essential_hours', 'sleep_hours', 'powernap']:
-                    disp_df[c] = disp_df[c].apply(format_duration)
+                    if c in disp_df.columns:
+                        disp_df[c] = disp_df[c].apply(format_duration)
+                
+                # Format good day column as emoji
+                if 'is_good_day' in disp_df.columns:
+                    disp_df['is_good_day'] = disp_df['is_good_day'].apply(
+                        lambda x: "—" if pd.isna(x) or x is None else ("✅" if x else "❌")
+                    )
+                
+                _col_config = {
+                    "date": "Date",
+                    "productivity_%": st.column_config.ProgressColumn("Productivity (%)", min_value=0, max_value=100, format="%d%%", help="Productive ÷ (Productive + Waste)"),
+                    "overall_%": st.column_config.ProgressColumn("Overall (%)", min_value=0, max_value=100, format="%d%%", help="(Productive + Essential) ÷ (Productive + Waste + Essential)"),
+                    "waste_%": st.column_config.ProgressColumn("Waste (%)", min_value=0, max_value=100, format="%d%%"),
+                    "cf_rating": "CF Rating",
+                    "is_good_day": "Good Day?",
+                    "productive_hours": "Prod (h)",
+                    "waste_hours": "Waste (h)",
+                    "essential_hours": "Ess (h)",
+                    "sleep_hours": "Sleep (h)",
+                    "powernap": "Nap (h)"
+                }
                 st.dataframe(disp_df, 
-                             column_config={
-                                 "date": "Date",
-                                 "productivity_%": st.column_config.ProgressColumn("Productivity (%)", min_value=0, max_value=100, format="%d%%"),
-                                 "waste_%": st.column_config.ProgressColumn("Waste (%)", min_value=0, max_value=100, format="%d%%"),
-                                 "productive_hours": "Prod (h)",
-                                 "waste_hours": "Waste (h)",
-                                 "essential_hours": "Ess (h)",
-                                 "sleep_hours": "Sleep (h)",
-                                 "powernap": "Nap (h)"
-                             },
+                             column_config=_col_config,
                              width='stretch', hide_index=True)
     
     
@@ -190,7 +498,14 @@ def render(USER, USER_CONFIG):
                         all_sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                         all_powernap_dict[date_str] = curr.get('powernap', 0)
                         
-                        all_sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints3 = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str3 = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str3.upper():
+                            _raw_ints3 = [(s, e) for s, e in _raw_ints3 if s < 12.0]
+                        all_sleep_intervals_dict[date_str] = _raw_ints3
             except:
                 all_sleep_intervals_dict = {}
                 all_sleep_hours_dict = {}
@@ -207,8 +522,8 @@ def render(USER, USER_CONFIG):
                     st.markdown("#### Top 10 Days")
                     col_p, col_w = st.columns(2)
                     with col_p:
-                        st.markdown("**Productive Days**")
-                        st.dataframe(get_top_periods(all_time_report, 'Day', 'productive'), hide_index=True, width='stretch')
+                        st.markdown("**Productive Days** *(Excl. Test)*")
+                        st.dataframe(get_top_periods(all_time_report, 'Day', 'productive', exclude_test=True), hide_index=True, width='stretch')
                     with col_w:
                         st.markdown("**Waste Days**")
                         st.dataframe(get_top_periods(all_time_report, 'Day', 'waste'), hide_index=True, width='stretch')
@@ -273,6 +588,138 @@ def render(USER, USER_CONFIG):
                 st.plotly_chart(fig_wd_combined, width='stretch', key="weekday_combined")
             else:
                 st.caption("Not enough data for weekday trend.")
+    
+            st.divider()
+            st.markdown("### 🚶‍♂️ Walk & Exercise Analytics")
+            st.caption("Daily physical activity trends and weekday consistency over the last 30 days.")
+
+            walk_mask_30 = (
+                df_trend30['type'].isin(['Walk/Exercise', 'Walk', 'Exercise']) |
+                df_trend30['subject'].astype(str).str.lower().isin(['walk', 'exercise', 'walking', 'workout', 'running', 'jogging'])
+            )
+            walk_trend30 = df_trend30[walk_mask_30].copy()
+
+            # Date range for last 30 days
+            _t30_dates = [(get_ist_now().date() - timedelta(days=i)).strftime('%Y-%m-%d') for i in reversed(range(30))]
+
+            if not walk_trend30.empty:
+                walk_daily = walk_trend30.groupby('date')['duration'].sum().reindex(_t30_dates, fill_value=0.0).reset_index()
+                walk_daily.columns = ['date', 'duration']
+                walk_daily['minutes'] = (walk_daily['duration'] * 60).round(0)
+                walk_daily['display_date'] = pd.to_datetime(walk_daily['date']).dt.strftime('%d %b')
+                walk_daily['day_name'] = pd.to_datetime(walk_daily['date']).dt.day_name()
+
+                total_walk_hrs = float(walk_daily['duration'].sum())
+                active_walk_days = int((walk_daily['duration'] > 0).sum())
+                avg_walk_mins = round((total_walk_hrs * 60) / 30, 1)
+                consistency_pct = round((active_walk_days / 30) * 100, 1)
+
+                # Metrics row
+                wm1, wm2, wm3, wm4 = st.columns(4)
+                wm1.metric(
+                    "Total Walk/Exercise (30d)",
+                    format_duration(total_walk_hrs),
+                    help="Total time logged for walk and exercise in the last 30 days."
+                )
+                wm2.metric(
+                    "Daily Average",
+                    f"{avg_walk_mins:g} mins/day",
+                    delta="Target: 30m/d",
+                    delta_color="normal" if avg_walk_mins >= 30 else "off",
+                    help="Average daily walk/exercise time across all 30 days."
+                )
+                wm3.metric(
+                    "Active Days",
+                    f"{active_walk_days} / 30 days",
+                    help="Number of days with logged walk or exercise in the last 30 days."
+                )
+                wm4.metric(
+                    "Consistency Rate",
+                    f"{consistency_pct}%",
+                    delta="Active Days ÷ 30",
+                    delta_color="off",
+                    help="Percentage of the last 30 days on which walk/exercise was performed."
+                )
+
+                # Graphs: 30-day timeline & weekday distribution
+                w_col1, w_col2 = st.columns([1.5, 1.0])
+
+                with w_col1:
+                    fig_walk_trend = go.Figure()
+                    fig_walk_trend.add_trace(go.Bar(
+                        x=walk_daily['display_date'],
+                        y=walk_daily['duration'],
+                        name="Hours Logged",
+                        marker=dict(
+                            color=walk_daily['duration'].apply(lambda d: '#6366f1' if d >= 0.5 else ('#818cf8' if d > 0 else '#1e293b')),
+                            line=dict(color='#4338ca', width=1)
+                        ),
+                        hovertemplate="<b>%{x}</b><br>Duration: %{y:.2f} hrs (%{customdata:.0f} mins)<extra></extra>",
+                        customdata=walk_daily['minutes']
+                    ))
+                    # 30-min target benchmark line
+                    fig_walk_trend.add_hline(
+                        y=0.5,
+                        line_dash="dash",
+                        line_color="#22c55e",
+                        annotation_text="30m Target",
+                        annotation_position="top right",
+                        annotation_font=dict(color="#22c55e", size=10)
+                    )
+                    fig_walk_trend.update_layout(
+                        title="Daily Walk/Exercise Duration — Last 30 Days",
+                        xaxis_title="Date",
+                        yaxis_title="Hours",
+                        paper_bgcolor="#0f172a",
+                        plot_bgcolor="#0f172a",
+                        font=dict(family="Inter, system-ui, sans-serif", color="#e2e8f0"),
+                        margin=dict(l=40, r=20, t=40, b=40),
+                        height=300
+                    )
+                    st.plotly_chart(fig_walk_trend, width='stretch', key="walk_exercise_trend_30d")
+
+                with w_col2:
+                    days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                    walk_trend30_copy = walk_trend30.copy()
+                    walk_trend30_copy['date_dt'] = pd.to_datetime(walk_trend30_copy['date'])
+                    walk_trend30_copy['day_of_week'] = walk_trend30_copy['date_dt'].dt.day_name()
+                    
+                    counts_walk = pd.Series(pd.to_datetime(_t30_dates)).dt.day_name().value_counts().to_dict()
+                    
+                    wd_walk = walk_trend30_copy.groupby('day_of_week')['duration'].sum().reset_index()
+                    wd_walk['avg_hours'] = wd_walk.apply(lambda x: x['duration'] / counts_walk.get(x['day_of_week'], 1), axis=1)
+                    wd_walk['day_of_week'] = pd.Categorical(wd_walk['day_of_week'], categories=days_order, ordered=True)
+                    wd_walk = wd_walk.sort_values('day_of_week')
+
+                    fig_walk_wd = px.bar(
+                        wd_walk,
+                        x='day_of_week',
+                        y='avg_hours',
+                        title="Avg Duration by Weekday",
+                        color='avg_hours',
+                        color_continuous_scale=[[0.0, "#1e1b4b"], [0.5, "#6366f1"], [1.0, "#a5b4fc"]]
+                    )
+                    fig_walk_wd.update_layout(
+                        xaxis_title="",
+                        yaxis_title="Avg Hours",
+                        paper_bgcolor="#0f172a",
+                        plot_bgcolor="#0f172a",
+                        font=dict(family="Inter, system-ui, sans-serif", color="#e2e8f0"),
+                        coloraxis_showscale=False,
+                        margin=dict(l=40, r=20, t=40, b=40),
+                        height=300
+                    )
+                    st.plotly_chart(fig_walk_wd, width='stretch', key="walk_exercise_wd")
+            else:
+                st.info("ℹ️ No Walk/Exercise activities logged in the last 30 days. Log your walks or workouts in the **Daily Entry** tab to track physical activity habits.")
+                st.markdown("""
+                <div style="padding:12px 18px;background:#0f172a;border-radius:10px;border:1px solid #1e293b;margin:8px 0 16px 0;display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:24px;">🏃</span>
+                    <div style="font-size:13px;color:#cbd5e1;">
+                        <strong>Health Tip:</strong> A 30-minute daily walk or workout releases BDNF and endorphins, boosting evening study focus and recall capacity by up to 30%.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
     
             st.divider()
             st.markdown("### 📱 Social Media & 📞 TalkOnCall Analytics")
@@ -351,21 +798,53 @@ def render(USER, USER_CONFIG):
             st.markdown("## 📊 Productivity Summary & AI Analysis")
             
             # Summary Metrics Display
-            st.markdown("### 📈 Key Productivity Metrics")
+            st.markdown(f"### 📈 Key Productivity Metrics ({day_text} Summary)")
             
-            sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+            sum_col1, sum_col2, sum_col3, sum_col4, sum_col5 = st.columns(5)
+            avg_prod_dur = prod_total / num_daily_days if num_daily_days > 0 else 0
+            avg_ess_dur = essential_total / num_daily_days if num_daily_days > 0 else 0
+            avg_waste_dur = waste_total / num_daily_days if num_daily_days > 0 else 0
+            
             with sum_col1:
-                st.metric("📚 Productive Hours", format_duration(prod_total), 
-                         delta=f"{(prod_total/(prod_total+essential_total+waste_total)*100) if (prod_total+essential_total+waste_total)>0 else 0:.0f}%")
+                st.metric(
+                    label=f"📚 Productive ({day_text})",
+                    value=format_duration(prod_total), 
+                    delta=f"Avg {format_duration(avg_prod_dur)}/d" if num_daily_days > 0 else None,
+                    delta_color="off",
+                    help=f"Total productive hours over {num_daily_days} recorded days. Daily average: {format_duration(avg_prod_dur)}/day."
+                )
             with sum_col2:
-                st.metric("⚡ Essential Hours", format_duration(essential_total),
-                         delta=f"{(essential_total/(prod_total+essential_total+waste_total)*100) if (prod_total+essential_total+waste_total)>0 else 0:.0f}%")
+                st.metric(
+                    label=f"⚡ Essential ({day_text})",
+                    value=format_duration(essential_total),
+                    delta=f"Avg {format_duration(avg_ess_dur)}/d" if num_daily_days > 0 else None,
+                    delta_color="off",
+                    help=f"Total essential hours over {num_daily_days} recorded days. Daily average: {format_duration(avg_ess_dur)}/day."
+                )
             with sum_col3:
-                st.metric("⚠️ Waste Hours", format_duration(waste_total),
-                         delta=f"{(waste_total/(prod_total+essential_total+waste_total)*100) if (prod_total+essential_total+waste_total)>0 else 0:.0f}%")
+                st.metric(
+                    label=f"⚠️ Waste ({day_text})",
+                    value=format_duration(waste_total),
+                    delta=f"Avg {format_duration(avg_waste_dur)}/d" if num_daily_days > 0 else None,
+                    delta_color="off",
+                    help=f"Total waste hours over {num_daily_days} recorded days. Daily average: {format_duration(avg_waste_dur)}/day."
+                )
             with sum_col4:
-                st.metric("🎯 Overall Score", f"{productivity_score(df_daily, sleep_hours=sleep_hours_dict, sleep_intervals_dict=sleep_intervals_dict):.0f}%",
-                         delta=f"Streak: {streak(df_daily)}d")
+                st.metric(
+                    label=f"🎯 Productivity %",
+                    value=f"{daily_prod_score:.0f}%",
+                    delta="Prod ÷ (Prod + Waste)",
+                    delta_color="off",
+                    help=f"Productivity % = Productive ÷ (Productive + Waste). Averaged across {num_daily_days} recorded days."
+                )
+            with sum_col5:
+                st.metric(
+                    label=f"🌐 Overall %",
+                    value=f"{daily_overall_score:.0f}%",
+                    delta="(Prod + Ess) ÷ Total",
+                    delta_color="off",
+                    help=f"Overall % = (Productive + Essential) ÷ (Productive + Waste + Essential). Averaged across {num_daily_days} recorded days."
+                )
             
             # Time Allocation Analysis
             st.markdown("### 🔄 Time Allocation Breakdown")
@@ -464,8 +943,9 @@ def render(USER, USER_CONFIG):
                     trend_prod = recent_report['productive_hours'].mean()
                     trend_waste = recent_report['waste_hours'].mean()
                     trend_prod_pct = recent_report['productivity_%'].mean()
+                    trend_overall_pct = recent_report['overall_%'].mean() if 'overall_%' in recent_report.columns else 0.0
                     
-                    trend_col1, trend_col2, trend_col3 = st.columns(3)
+                    trend_col1, trend_col2, trend_col3, trend_col4 = st.columns(4)
                     
                     with trend_col1:
                         st.info(f"""
@@ -476,16 +956,25 @@ def render(USER, USER_CONFIG):
                     
                     with trend_col2:
                         st.info(f"""
-                        📊 **Waste Trend**
+                        📊 **Waste Trend ({recent_days}-Day Avg)**
                         
                         Waste: {format_duration(trend_waste)}/day
                         """)
                     
                     with trend_col3:
                         st.info(f"""
-                        📊 **Productivity Score**
+                        📊 **Productivity % ({recent_days}d Avg)**
                         
-                        Average: {trend_prod_pct:.0f}%
+                        **{trend_prod_pct:.0f}%**  
+                        Prod ÷ (Prod + Waste)
+                        """)
+
+                    with trend_col4:
+                        st.info(f"""
+                        📊 **Overall % ({recent_days}d Avg)**
+                        
+                        **{trend_overall_pct:.0f}%**  
+                        (Prod + Ess) ÷ Total
                         """)
             
             st.divider()
@@ -695,7 +1184,12 @@ def render(USER, USER_CONFIG):
             
             # We assume day-analysis shows sleep ending on that day
             # If they slept at 11 PM yesterday and woke up 6 AM today, we show 0-6 AM as sleep today.
-            day_sleep_intervals = get_sleep_intervals(prev_hl.get('sleep_time'), curr_hl.get('wakeup_time'))
+            # Only keep morning portion — the PM segment (e.g. 21.5-24.0) belongs to the previous night.
+            _di_raw = get_sleep_intervals(prev_hl.get('sleep_time'), curr_hl.get('wakeup_time'))
+            _prev_s = str(prev_hl.get('sleep_time', '') or '')
+            if 'PM' in _prev_s.upper():
+                _di_raw = [(s, e) for s, e in _di_raw if s < 12.0]
+            day_sleep_intervals = _di_raw
             
             tod_df = time_of_day_analysis_24h(df_selected, sleep_intervals=day_sleep_intervals)
             if not tod_df.empty:
@@ -817,7 +1311,12 @@ def render(USER, USER_CONFIG):
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
-                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            # Only keep morning portion — PM segment belongs to previous night
+                            _m_raw = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            _m_prev_s = str(prev.get('sleep_time', '') or '')
+                            if 'PM' in _m_prev_s.upper():
+                                _m_raw = [(s, e) for s, e in _m_raw if s < 12.0]
+                            sleep_intervals_dict[date_str] = _m_raw
                 except:
                     sleep_hours_dict = {}
                     sleep_intervals_dict = {}
@@ -827,12 +1326,129 @@ def render(USER, USER_CONFIG):
                 essential_m = month_df[month_df['type'].isin(ALL_ESSENTIAL)]
                 waste_m     = month_df[~month_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
     
-                pm1, pm2, pm3, pm4 = st.columns(4)
-                pm1.metric("Productive Hrs", f"{round(prod_m['duration'].sum(),1)}h")
-                pm2.metric("Essential Hrs",  f"{round(essential_m['duration'].sum(),1)}h")
-                pm3.metric("Waste Hrs",      f"{round(waste_m['duration'].sum(),1)}h")
-                pm4.metric("Productivity %", f"{productivity_score(month_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
+                m_days = month_df['date'].nunique()
+                m_day_text = f"{m_days} Days" if m_days != 1 else "1 Day"
+                m_avg_prod = round(prod_m['duration'].sum() / m_days, 1) if m_days else 0
+                m_avg_ess = round(essential_m['duration'].sum() / m_days, 1) if m_days else 0
+                m_avg_waste = round(waste_m['duration'].sum() / m_days, 1) if m_days else 0
+                m_prod_pct = productivity_score(month_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+                m_overall_pct = overall_score(month_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+
+                pm1, pm2, pm3, pm4, pm5 = st.columns(5)
+                pm1.metric(f"Productive Hrs ({m_day_text})", f"{round(prod_m['duration'].sum(),1)}h",
+                           delta=f"Avg {m_avg_prod}h/day ({m_days}d)" if m_days else None, delta_color="off",
+                           help=f"Total productive hours across {m_days} days in {month_str} (Daily average: {m_avg_prod}h/day).")
+                pm2.metric(f"Essential Hrs ({m_day_text})",  f"{round(essential_m['duration'].sum(),1)}h",
+                           delta=f"Avg {m_avg_ess}h/day ({m_days}d)" if m_days else None, delta_color="off",
+                           help=f"Total essential hours across {m_days} days in {month_str} (Daily average: {m_avg_ess}h/day).")
+                pm3.metric(f"Waste Hrs ({m_day_text})",      f"{round(waste_m['duration'].sum(),1)}h",
+                           delta=f"Avg {m_avg_waste}h/day ({m_days}d)" if m_days else None, delta_color="off",
+                           help=f"Total waste hours across {m_days} days in {month_str} (Daily average: {m_avg_waste}h/day).")
+                pm4.metric(f"Productivity % ({m_day_text} Avg)", f"{m_prod_pct}%",
+                           delta="Prod ÷ (Prod + Waste)", delta_color="off",
+                           help=f"Productivity % = Productive ÷ (Productive + Waste) averaged across {m_days} recorded days in {month_str}.")
+                pm5.metric(f"Overall % ({m_day_text} Avg)", f"{m_overall_pct}%",
+                           delta="(Prod + Ess) ÷ Total", delta_color="off",
+                           help=f"Overall % = (Productive + Essential) ÷ (Productive + Waste + Essential) averaged across {m_days} recorded days in {month_str}.")
     
+                st.divider()
+
+                # ── TOP SUMMARY: MONTHLY STUDY HOURS & WEEKLY BREAKDOWN ──
+                import calendar as _calendar
+                sel_y_int = int(sel_year_m)
+                sel_m_int = int(sel_month_m)
+                num_days_in_m = _calendar.monthrange(sel_y_int, sel_m_int)[1]
+                today_date = get_ist_now().date()
+                if sel_y_int == today_date.year and sel_m_int == today_date.month:
+                    elapsed_days_m = today_date.day
+                elif sel_y_int < today_date.year or (sel_y_int == today_date.year and sel_m_int < today_date.month):
+                    elapsed_days_m = num_days_in_m
+                else:
+                    elapsed_days_m = 0
+
+                denom_days_m = elapsed_days_m if elapsed_days_m > 0 else num_days_in_m
+                total_study_m = round(prod_m['duration'].sum(), 2)
+                recorded_study_days_m = prod_m[prod_m['duration'] > 0]['date'].nunique()
+                avg_study_per_day_m = round(total_study_m / denom_days_m, 2) if denom_days_m > 0 else 0.0
+                avg_study_per_week_m = round(total_study_m / (denom_days_m / 7.0), 2) if denom_days_m > 0 else 0.0
+
+                st.markdown(f"### ⏱️ Study Hours Overview & Weekly Breakdown — {month_str}")
+                sm_col1, sm_col2, sm_col3, sm_col4 = st.columns(4)
+                sm_col1.metric("📚 Total Study Hours", f"{total_study_m:.1f} hrs", help=f"Total study hours logged in {month_str}")
+                sm_col2.metric("⏱️ Avg Study Hours / Day", f"{avg_study_per_day_m:.2f} hrs/d", help=f"Average daily study hours across {denom_days_m} days in month")
+                sm_col3.metric("🗓️ Avg Study Hours / Week", f"{avg_study_per_week_m:.2f} hrs/wk", help="Average weekly study hours pace")
+                sm_col4.metric("🎯 Active Study Days", f"{recorded_study_days_m} / {denom_days_m} days", help="Days with logged study activities")
+
+                week_mode = st.radio(
+                    "Weekly Division Method:",
+                    ["🗓️ Calendar Weeks (Mon–Sun)", "📆 7-Day Fixed Blocks (1-7, 8-14...)"],
+                    horizontal=True,
+                    key=f"pa_week_division_{month_str}"
+                )
+
+                weekly_intervals = []
+                if "Calendar Weeks" in week_mode:
+                    curr_d = _dt.date(sel_y_int, sel_m_int, 1)
+                    w_idx = 1
+                    while curr_d.month == sel_m_int:
+                        w_start = curr_d
+                        days_to_sun = 6 - curr_d.weekday()
+                        sun_d = curr_d + timedelta(days=days_to_sun)
+                        last_day_m = _dt.date(sel_y_int, sel_m_int, num_days_in_m)
+                        w_end = min(sun_d, last_day_m)
+                        weekly_intervals.append((f"Week {w_idx} ({w_start.strftime('%d %b')} – {w_end.strftime('%d %b')})", w_start, w_end))
+                        w_idx += 1
+                        curr_d = w_end + timedelta(days=1)
+                else:
+                    for w_idx, start_day in enumerate([1, 8, 15, 22, 29], start=1):
+                        if start_day > num_days_in_m:
+                            break
+                        w_start = _dt.date(sel_y_int, sel_m_int, start_day)
+                        end_day = min(start_day + 6, num_days_in_m)
+                        w_end = _dt.date(sel_y_int, sel_m_int, end_day)
+                        weekly_intervals.append((f"Week {w_idx} ({w_start.strftime('%d %b')} – {w_end.strftime('%d %b')})", w_start, w_end))
+
+                monthly_summary_rows = []
+                # Full Month Row
+                monthly_summary_rows.append({
+                    "Period": f"📌 Full Month ({month_str})",
+                    "Total Study Hours": total_study_m,
+                    "Avg Study Hours / Day": avg_study_per_day_m,
+                    "Avg Study Hours / Week": avg_study_per_week_m,
+                    "Active Days Logged": f"{recorded_study_days_m} / {denom_days_m} days ({round(recorded_study_days_m / denom_days_m * 100 if denom_days_m else 0)}%)"
+                })
+
+                for w_label, w_start, w_end in weekly_intervals:
+                    w_start_s = w_start.strftime('%Y-%m-%d')
+                    w_end_s = w_end.strftime('%Y-%m-%d')
+                    w_df = prod_m[(prod_m['date'] >= w_start_s) & (prod_m['date'] <= w_end_s)]
+                    w_study_hrs = round(w_df['duration'].sum(), 2) if not w_df.empty else 0.0
+                    w_days = (w_end - w_start).days + 1
+                    w_active = w_df[w_df['duration'] > 0]['date'].nunique() if not w_df.empty else 0
+                    w_avg_day = round(w_study_hrs / w_days, 2) if w_days > 0 else 0.0
+                    w_avg_week = round(w_avg_day * 7.0, 2)
+
+                    monthly_summary_rows.append({
+                        "Period": w_label,
+                        "Total Study Hours": w_study_hrs,
+                        "Avg Study Hours / Day": w_avg_day,
+                        "Avg Study Hours / Week": w_avg_week,
+                        "Active Days Logged": f"{w_active} / {w_days} days ({round(w_active / w_days * 100 if w_days else 0)}%)"
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(monthly_summary_rows),
+                    column_config={
+                        "Period": st.column_config.TextColumn("📅 Period / Week"),
+                        "Total Study Hours": st.column_config.NumberColumn("⏱️ Total Study Hours", format="%.2f hrs"),
+                        "Avg Study Hours / Day": st.column_config.NumberColumn("📊 Avg Study Hours / Day", format="%.2f hrs/d"),
+                        "Avg Study Hours / Week": st.column_config.NumberColumn("📈 Avg Study Hours / Week", format="%.2f hrs/wk"),
+                        "Active Days Logged": st.column_config.TextColumn("🎯 Active Days Logged")
+                    },
+                    hide_index=True,
+                    width='stretch'
+                )
+
                 st.divider()
     
                 # ── PRODUCTIVITY ANALYSIS ────────────────────────────────────
@@ -844,7 +1460,7 @@ def render(USER, USER_CONFIG):
                     disp_daily_m = daily_m.copy()
                     for c in ['productive_hours', 'essential_hours', 'waste_hours', 'sleep_hours']:
                         disp_daily_m[c] = disp_daily_m[c].apply(format_duration)
-                    st.dataframe(disp_daily_m[['date','productive_hours','essential_hours','waste_hours','sleep_hours','powernap','productivity_%']],
+                    st.dataframe(disp_daily_m[['date','productive_hours','essential_hours','waste_hours','sleep_hours','powernap','productivity_%','overall_%']],
                                  width='stretch')
     
                 m_bar_df = pd.DataFrame({
@@ -978,7 +1594,8 @@ def render(USER, USER_CONFIG):
                 st.markdown("#### 🔥 Top 10 Study Streaks")
                 m_streaks = calculate_top_streaks(month_df) # No need to pass year/month since month_df is already filtered
                 if m_streaks:
-                    st.dataframe(pd.DataFrame(m_streaks), 
+                    m_streaks_df = pd.DataFrame(m_streaks).sort_values('length', ascending=False)
+                    st.dataframe(m_streaks_df, 
                                  column_config={"start_date": "Start", "end_date": "End", "length": st.column_config.NumberColumn("Length (Days)", format="%d 🔥")},
                                  hide_index=True, width='stretch')
                 else:
@@ -991,6 +1608,7 @@ def render(USER, USER_CONFIG):
                     st.markdown("📅 **Top 10 Weekdays**")
                     top_wd = get_top_study_days(month_df, is_weekend=False)
                     if not top_wd.empty:
+                        top_wd = top_wd.sort_values('hours', ascending=False)
                         disp_top_wd = top_wd.copy()
                         disp_top_wd['hours'] = disp_top_wd['hours'].apply(format_duration)
                         st.dataframe(disp_top_wd[['date', 'hours', 'readings']], 
@@ -1003,6 +1621,7 @@ def render(USER, USER_CONFIG):
                     st.markdown("Weekend **Top 10 Weekends**")
                     top_we = get_top_study_days(month_df, is_weekend=True)
                     if not top_we.empty:
+                        top_we = top_we.sort_values('hours', ascending=False)
                         disp_top_we = top_we.copy()
                         disp_top_we['hours'] = disp_top_we['hours'].apply(format_duration)
                         st.dataframe(disp_top_we[['date', 'hours', 'readings']], 
@@ -1027,8 +1646,12 @@ def render(USER, USER_CONFIG):
                         curr_h = hl_map.get(str(d_str), {})
                         prev_d = (pd.to_datetime(str(d_str)) - timedelta(days=1)).strftime('%Y-%m-%d')
                         prev_h = hl_map.get(prev_d, {})
-                        intervals = get_sleep_intervals(prev_h.get('sleep_time'), curr_h.get('wakeup_time'))
-                        all_m_sleep_intervals.extend(intervals)
+                        # Only keep morning portion — PM segment belongs to previous night
+                        _cm_raw = get_sleep_intervals(prev_h.get('sleep_time'), curr_h.get('wakeup_time'))
+                        _cm_prev_s = str(prev_h.get('sleep_time', '') or '')
+                        if 'PM' in _cm_prev_s.upper():
+                            _cm_raw = [(s, e) for s, e in _cm_raw if s < 12.0]
+                        all_m_sleep_intervals.extend(_cm_raw)
     
                     cumul_24h = time_of_day_analysis_cumulative_24h(month_df, filter_month=month_str, all_sleep_intervals=all_m_sleep_intervals)
                 except Exception as e:
@@ -1180,7 +1803,12 @@ def render(USER, USER_CONFIG):
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
-                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            # Only keep morning portion — PM segment belongs to previous night
+                            _y_raw = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            _y_prev_s = str(prev.get('sleep_time', '') or '')
+                            if 'PM' in _y_prev_s.upper():
+                                _y_raw = [(s, e) for s, e in _y_raw if s < 12.0]
+                            sleep_intervals_dict[date_str] = _y_raw
                 except:
                     sleep_hours_dict = {}
                     sleep_intervals_dict = {}
@@ -1190,12 +1818,123 @@ def render(USER, USER_CONFIG):
                 essential_y = year_df[year_df['type'].isin(ALL_ESSENTIAL)]
                 waste_y     = year_df[~year_df['type'].isin(ALL_PRODUCTIVE + ALL_ESSENTIAL + ALL_NEUTRAL)]
     
-                py1, py2, py3, py4 = st.columns(4)
-                py1.metric("Productive Hrs", f"{round(prod_y['duration'].sum(),1)}h")
-                py2.metric("Essential Hrs",  f"{round(essential_y['duration'].sum(),1)}h")
-                py3.metric("Waste Hrs",      f"{round(waste_y['duration'].sum(),1)}h")
-                py4.metric("Productivity %", f"{productivity_score(year_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)}%")
+                y_days = year_df['date'].nunique()
+                y_day_text = f"{y_days} Days" if y_days != 1 else "1 Day"
+                y_avg_prod = round(prod_y['duration'].sum() / y_days, 1) if y_days else 0
+                y_avg_ess = round(essential_y['duration'].sum() / y_days, 1) if y_days else 0
+                y_avg_waste = round(waste_y['duration'].sum() / y_days, 1) if y_days else 0
+                y_prod_pct = productivity_score(year_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+                y_overall_pct = overall_score(year_df, sleep_hours=sleep_hours_dict, powernap_hours=powernap_dict, sleep_intervals_dict=sleep_intervals_dict)
+
+                py1, py2, py3, py4, py5 = st.columns(5)
+                py1.metric(f"Productive Hrs ({y_day_text})", f"{round(prod_y['duration'].sum(),1)}h",
+                           delta=f"Avg {y_avg_prod}h/day ({y_days}d)" if y_days else None, delta_color="off",
+                           help=f"Total productive hours across {y_days} recorded days in {int(sel_year_y)} (Daily average: {y_avg_prod}h/day).")
+                py2.metric(f"Essential Hrs ({y_day_text})",  f"{round(essential_y['duration'].sum(),1)}h",
+                           delta=f"Avg {y_avg_ess}h/day ({y_days}d)" if y_days else None, delta_color="off",
+                           help=f"Total essential hours across {y_days} recorded days in {int(sel_year_y)} (Daily average: {y_avg_ess}h/day).")
+                py3.metric(f"Waste Hrs ({y_day_text})",      f"{round(waste_y['duration'].sum(),1)}h",
+                           delta=f"Avg {y_avg_waste}h/day ({y_days}d)" if y_days else None, delta_color="off",
+                           help=f"Total waste hours across {y_days} recorded days in {int(sel_year_y)} (Daily average: {y_avg_waste}h/day).")
+                py4.metric(f"Productivity % ({y_day_text} Avg)", f"{y_prod_pct}%",
+                           delta="Prod ÷ (Prod + Waste)", delta_color="off",
+                           help=f"Productivity % = Productive ÷ (Productive + Waste) averaged across {y_days} recorded days in {int(sel_year_y)}.")
+                py5.metric(f"Overall % ({y_day_text} Avg)", f"{y_overall_pct}%",
+                           delta="(Prod + Ess) ÷ Total", delta_color="off",
+                           help=f"Overall % = (Productive + Essential) ÷ (Productive + Waste + Essential) averaged across {y_days} recorded days in {int(sel_year_y)}.")
     
+                st.divider()
+
+                # ── TOP SUMMARY: YEARLY STUDY HOURS & MONTHLY BREAKDOWN ──
+                import calendar as _calendar
+                sel_y_int = int(sel_year_y)
+                days_in_year = 366 if _calendar.isleap(sel_y_int) else 365
+                today_date = get_ist_now().date()
+                if sel_y_int == today_date.year:
+                    elapsed_days_y = (today_date - _dt2.date(sel_y_int, 1, 1)).days + 1
+                    elapsed_months_y = today_date.month
+                elif sel_y_int < today_date.year:
+                    elapsed_days_y = days_in_year
+                    elapsed_months_y = 12
+                else:
+                    elapsed_days_y = 0
+                    elapsed_months_y = 0
+
+                denom_days_y = elapsed_days_y if elapsed_days_y > 0 else days_in_year
+                denom_months_y = elapsed_months_y if elapsed_months_y > 0 else 12
+                total_study_y = round(prod_y['duration'].sum(), 2)
+                recorded_study_days_y = prod_y[prod_y['duration'] > 0]['date'].nunique()
+                avg_study_per_month_y = round(total_study_y / denom_months_y, 2) if denom_months_y > 0 else 0.0
+                avg_study_per_day_y = round(total_study_y / denom_days_y, 2) if denom_days_y > 0 else 0.0
+
+                st.markdown(f"### ⏱️ Study Hours Overview & Monthly Breakdown — {sel_y_int}")
+                sy_col1, sy_col2, sy_col3, sy_col4 = st.columns(4)
+                sy_col1.metric("📚 Total Study Hours", f"{total_study_y:.1f} hrs", help=f"Total study hours logged in {sel_y_int}")
+                sy_col2.metric("🗓️ Avg Study Hours / Month", f"{avg_study_per_month_y:.2f} hrs/mo", help=f"Average monthly study hours across {denom_months_y} months")
+                sy_col3.metric("⏱️ Avg Study Hours / Day", f"{avg_study_per_day_y:.2f} hrs/d", help=f"Average daily study hours across {denom_days_y} days")
+                sy_col4.metric("🎯 Active Study Days", f"{recorded_study_days_y} / {denom_days_y} days", help="Days with logged study activities")
+
+                yearly_summary_rows = []
+                # Full Year Row
+                yearly_summary_rows.append({
+                    "Period": f"📌 Full Year ({sel_y_int})",
+                    "Total Study Hours": total_study_y,
+                    "Avg Study Hours / Month": avg_study_per_month_y,
+                    "Avg Study Hours / Day": avg_study_per_day_y,
+                    "Avg Study Hours / Week": round(total_study_y / (denom_days_y / 7.0), 2) if denom_days_y > 0 else 0.0,
+                    "Active Days Logged": f"{recorded_study_days_y} / {denom_days_y} days ({round(recorded_study_days_y / denom_days_y * 100 if denom_days_y else 0)}%)"
+                })
+
+                year_df_copy = year_df.copy()
+                year_df_copy['month_num'] = pd.to_datetime(year_df_copy['date']).dt.month
+                prod_y_copy = prod_y.copy()
+                prod_y_copy['month_num'] = pd.to_datetime(prod_y_copy['date']).dt.month
+
+                for mn in range(1, 13):
+                    m_name = _calendar.month_name[mn]
+                    m_days_in_mn = _calendar.monthrange(sel_y_int, mn)[1]
+                    if sel_y_int == today_date.year:
+                        if mn < today_date.month:
+                            m_elapsed = m_days_in_mn
+                        elif mn == today_date.month:
+                            m_elapsed = today_date.day
+                        else:
+                            m_elapsed = 0
+                    elif sel_y_int < today_date.year:
+                        m_elapsed = m_days_in_mn
+                    else:
+                        m_elapsed = 0
+
+                    m_denom = m_elapsed if m_elapsed > 0 else m_days_in_mn
+                    m_prod_sub = prod_y_copy[prod_y_copy['month_num'] == mn]
+                    m_study_hrs = round(m_prod_sub['duration'].sum(), 2) if not m_prod_sub.empty else 0.0
+                    m_active = m_prod_sub[m_prod_sub['duration'] > 0]['date'].nunique() if not m_prod_sub.empty else 0
+                    m_avg_day = round(m_study_hrs / m_denom, 2) if m_denom > 0 else 0.0
+                    m_avg_week = round(m_avg_day * 7.0, 2)
+
+                    yearly_summary_rows.append({
+                        "Period": f"{m_name} {sel_y_int}",
+                        "Total Study Hours": m_study_hrs,
+                        "Avg Study Hours / Month": m_study_hrs,
+                        "Avg Study Hours / Day": m_avg_day,
+                        "Avg Study Hours / Week": m_avg_week,
+                        "Active Days Logged": f"{m_active} / {m_denom} days ({round(m_active / m_denom * 100 if m_denom else 0)}%)"
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(yearly_summary_rows),
+                    column_config={
+                        "Period": st.column_config.TextColumn("🗓️ Period / Month"),
+                        "Total Study Hours": st.column_config.NumberColumn("⏱️ Total Study Hours", format="%.2f hrs"),
+                        "Avg Study Hours / Month": st.column_config.NumberColumn("📅 Avg Study Hours / Month", format="%.2f hrs/mo"),
+                        "Avg Study Hours / Day": st.column_config.NumberColumn("📊 Avg Study Hours / Day", format="%.2f hrs/d"),
+                        "Avg Study Hours / Week": st.column_config.NumberColumn("📈 Avg Study Hours / Week", format="%.2f hrs/wk"),
+                        "Active Days Logged": st.column_config.TextColumn("🎯 Active Days Logged")
+                    },
+                    hide_index=True,
+                    width='stretch'
+                )
+
                 st.divider()
     
                 year_df = year_df.copy()
@@ -1339,7 +2078,8 @@ def render(USER, USER_CONFIG):
                 st.markdown("#### 🔥 Top 10 Study Streaks")
                 y_streaks = calculate_top_streaks(year_df)
                 if y_streaks:
-                    st.dataframe(pd.DataFrame(y_streaks), 
+                    y_streaks_df = pd.DataFrame(y_streaks).sort_values('length', ascending=False)
+                    st.dataframe(y_streaks_df, 
                                  column_config={"start_date": "Start", "end_date": "End", "length": st.column_config.NumberColumn("Length (Days)", format="%d 🔥")},
                                  hide_index=True, width='stretch')
                 else:
@@ -1352,7 +2092,10 @@ def render(USER, USER_CONFIG):
                     st.markdown("📅 **Top 10 Weekdays**")
                     top_ywd = get_top_study_days(year_df, is_weekend=False)
                     if not top_ywd.empty:
-                        st.dataframe(top_ywd[['date', 'hours', 'readings']], 
+                        top_ywd = top_ywd.sort_values('hours', ascending=False)
+                        disp_top_ywd = top_ywd.copy()
+                        disp_top_ywd['hours'] = disp_top_ywd['hours'].apply(format_duration)
+                        st.dataframe(disp_top_ywd[['date', 'hours', 'readings']], 
                                      column_config={"date": "Date", "hours": "Hrs", "readings": "What I was reading"},
                                      hide_index=True, width='stretch')
                     else:
@@ -1362,7 +2105,10 @@ def render(USER, USER_CONFIG):
                     st.markdown("Weekend **Top 10 Weekends**")
                     top_ywe = get_top_study_days(year_df, is_weekend=True)
                     if not top_ywe.empty:
-                        st.dataframe(top_ywe[['date', 'hours', 'readings']], 
+                        top_ywe = top_ywe.sort_values('hours', ascending=False)
+                        disp_top_ywe = top_ywe.copy()
+                        disp_top_ywe['hours'] = disp_top_ywe['hours'].apply(format_duration)
+                        st.dataframe(disp_top_ywe[['date', 'hours', 'readings']], 
                                      column_config={"date": "Date", "hours": "Hrs", "readings": "What I was reading"},
                                      hide_index=True, width='stretch')
                     else:

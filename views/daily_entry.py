@@ -15,11 +15,86 @@ def render(USER, USER_CONFIG):
                 del st.session_state[k]
         st.session_state["_clear_de_form"] = False
 
+    # ── 🎉 TARGET ACHIEVEMENT CELEBRATION (fires on rerun after save) ──────
+    _celebration_subject = st.session_state.pop("_show_target_celebration", None)
+    if _celebration_subject:
+        st.balloons()
+        st.markdown(f"""
+        <style>
+        @keyframes popper-fall {{
+            0% {{ opacity: 1; transform: translateY(-60px) rotate(0deg); }}
+            100% {{ opacity: 0; transform: translateY(110vh) rotate(720deg); }}
+        }}
+        @keyframes wt-pop-in {{
+            0% {{ transform: scale(0.5) translateY(-30px); opacity: 0; }}
+            70% {{ transform: scale(1.08) translateY(4px); opacity: 1; }}
+            100% {{ transform: scale(1) translateY(0); opacity: 1; }}
+        }}
+        .wt-celebration-overlay {{
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 9999; pointer-events: none; overflow: hidden;
+        }}
+        .wt-confetti-piece {{
+            position: absolute; top: -10px; width: 10px; height: 20px;
+            border-radius: 2px; opacity: 0.95;
+            animation: popper-fall linear forwards;
+        }}
+        .wt-celebration-banner {{
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10000;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 3px solid #f59e0b; border-radius: 20px;
+            padding: 28px 40px; text-align: center;
+            box-shadow: 0 0 60px rgba(245,158,11,0.5), 0 20px 60px rgba(0,0,0,0.8);
+            animation: wt-pop-in 0.5s ease forwards;
+            max-width: 420px; width: 90%;
+        }}
+        .wt-celebration-banner h2 {{ color: #fbbf24; font-size: 1.8rem; margin: 0 0 8px; }}
+        .wt-celebration-banner p {{ color: #e2e8f0; font-size: 1rem; margin: 0; }}
+        </style>
+        <div class="wt-celebration-overlay" id="confetti-overlay">
+        </div>
+        <div class="wt-celebration-banner" id="celebration-banner">
+            <h2>🎉 Target Achieved!</h2>
+            <p>You completed the <strong style="color:#fbbf24;">{_celebration_subject}</strong> target!</p>
+            <p style="font-size:0.85rem; color:#94a3b8; margin-top:8px;">🏆 Amazing dedication — keep it up!</p>
+        </div>
+        <script>
+        (function() {{
+            var colors = ['#f59e0b','#ef4444','#3b82f6','#22c55e','#a855f7','#fb923c','#ec4899','#14b8a6'];
+            var overlay = document.getElementById('confetti-overlay');
+            for (var i = 0; i < 90; i++) {{
+                (function(idx) {{
+                    setTimeout(function() {{
+                        var p = document.createElement('div');
+                        p.className = 'wt-confetti-piece';
+                        p.style.left = Math.random() * 100 + '%';
+                        p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                        p.style.width = (6 + Math.random() * 10) + 'px';
+                        p.style.height = (10 + Math.random() * 20) + 'px';
+                        p.style.animationDuration = (2.5 + Math.random() * 3) + 's';
+                        p.style.animationDelay = (Math.random() * 0.5) + 's';
+                        p.style.transform = 'rotate(' + (Math.random() * 360) + 'deg)';
+                        if (overlay) overlay.appendChild(p);
+                        setTimeout(function() {{ if (p.parentNode) p.parentNode.removeChild(p); }}, 6000);
+                    }}, idx * 30);
+                }})(i);
+            }}
+            // Auto-dismiss banner after 4s
+            setTimeout(function() {{
+                var banner = document.getElementById('celebration-banner');
+                if (banner) {{ banner.style.transition = 'opacity 0.5s'; banner.style.opacity = '0'; setTimeout(function(){{ if(banner.parentNode) banner.parentNode.removeChild(banner); }}, 600); }}
+            }}, 4000);
+        }})();
+        </script>
+        """, unsafe_allow_html=True)
+
     conn = database.conn
     c = database.c
     st.title("📅 Smart Entry")
-    
+
     date = st.date_input("Date")
+
     
     # Persistent Tab Navigation
     st.markdown("""
@@ -109,7 +184,7 @@ def render(USER, USER_CONFIG):
         _user_defaults = get_user_defaults(USER)
         base_activities = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthink", "Food", "Transport",
             "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
             "Turf", "Travelling", "Powernap"
         ]
@@ -194,7 +269,7 @@ def render(USER, USER_CONFIG):
         with _act_col:
             _all_acts = base_activities + custom + ["+ Add New"]
             _def_act_idx = _all_acts.index(_editing_activity_type) if _editing_activity_type in _all_acts else 0
-            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx, format_func=lambda x: "⚠️ Overthinking (Waste)" if x == "Overthinking" else x)
+            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx)
             
             if st.session_state.get("last_selected_activity") != activity:
                 # Don't wipe edit state when editing mode just loaded with the correct activity
@@ -514,17 +589,8 @@ def render(USER, USER_CONFIG):
             _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
             sub2 = _final_val(_t2, _base_dest)
             st.caption("💡 For multi-day trips with study tracking, use the **✈️ Log Trip** tab.")
-        elif activity == "Overthinking":
-            st.markdown("""
-            <div style="background: rgba(239, 68, 68, 0.12); border: 1.5px solid #ef4444; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">⚠️</span>
-                <div>
-                    <span style="color: #fca5a5; font-weight: 700; font-size: 13.5px;">Waste Activity Alert — Overthinking</span><br>
-                    <span style="color: #94a3b8; font-size: 11.5px;">Track your overthinking triggers to identify patterns and reclaim your study focus.</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            _def_sub1, _def_sub2 = _user_defaults.get("Overthinking", ("", ""))
+        elif activity in ("Overthink", "Overthinking"):
+            _def_sub1, _def_sub2 = _user_defaults.get("Overthink") or _user_defaults.get("Overthinking", ("", ""))
             _def_ot_idx = 0
             if _def_sub1 in overthinking_triggers:
                 _def_ot_idx = overthinking_triggers.index(_def_sub1)
@@ -685,7 +751,7 @@ def render(USER, USER_CONFIG):
                         "UPDATE activities SET type=%s, subject=%s, chapter=%s, duration=%s, amount=%s, start_time=%s, description=%s, status=%s WHERE id=%s AND username=%s",
                         (activity, sub1, sub2, duration_today, amount, f"{from_h}:{from_m:02d}", description, entry_status, _editing_entry_id, USER)
                     )
-                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}", description, entry_status))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, "0:00", description, entry_status))
                 else:
                     c.execute(
                         "UPDATE activities SET type=%s, subject=%s, chapter=%s, duration=%s, amount=%s, start_time=%s, description=%s, status=%s WHERE id=%s AND username=%s",
@@ -698,7 +764,7 @@ def render(USER, USER_CONFIG):
                 # Normal insert
                 if is_midnight_crossing:
                     c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration_today, amount, USER, f"{from_h}:{from_m:02d}", description, entry_status))
-                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, f"{to_h}:{to_m:02d}", description, entry_status))
+                    c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date + timedelta(days=1)), activity, sub1, sub2, duration_tomorrow, 0, USER, "0:00", description, entry_status))
                 else:
                     c.execute("INSERT INTO activities (date,type,subject,chapter,duration,amount,username,start_time,description,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (str(date), activity, sub1, sub2, duration, amount, USER, start_time, description, entry_status))
 
@@ -716,10 +782,22 @@ def render(USER, USER_CONFIG):
             _msg = "✅ Activity updated!" if _editing_entry_id else "✅ Activity saved!"
             st.toast(_msg, icon="✅")
             invalidate_activities_cache(USER)
+
+            # ── 🎉 TARGET ACHIEVEMENT CELEBRATION ────────────────────────────
+            # Show popper only when entering an entry for a subject for which a target is set,
+            # for up to 1 day after target completion or until next target is set for that subject.
+            try:
+                _sub_to_cel = check_subject_target_celebration(USER, sub1, date)
+                if _sub_to_cel:
+                    st.session_state["_show_target_celebration"] = _sub_to_cel
+            except Exception:
+                pass
+
             # Request clearing of input fields safely to force frontend update
             st.session_state["_clear_de_form"] = True
-                    
+
             import time; time.sleep(1); st.rerun()
+
 
     
         st.divider()
@@ -729,7 +807,7 @@ def render(USER, USER_CONFIG):
         else:
             for _, _row in _today_df.iterrows():
                 rid = int(_row['id'])
-                _act_disp = f"⚠️ {_row['type']}" if _row['type'] in ("Overthinking", "⚠️ Overthinking") else _row['type']
+                _act_disp = _row['type']
                 parts = [_act_disp]
                 if _row['subject']: parts.append(str(_row['subject']))
                 ch = get_clean_chapter(_row['chapter'])
@@ -1018,6 +1096,12 @@ def render(USER, USER_CONFIG):
 
                 conn.commit()
                 invalidate_activities_cache(USER)
+                if _lt_study_raw:
+                    for _study_subj, _ in _lt_study_raw:
+                        _cel_sub = check_subject_target_celebration(USER, _study_subj, _trip_start)
+                        if _cel_sub:
+                            st.session_state["_show_target_celebration"] = _cel_sub
+                            break
                 # Reset destination and study counts
                 st.session_state.lt_dest_count = 1
                 st.session_state.lt_study_count = 1
@@ -1284,7 +1368,7 @@ def render(USER, USER_CONFIG):
     
         _ACT_TYPES = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthink", "Food", "Transport",
             "Office", "WFH", "Coaching", "WentOutside", "Turf", "Travelling"
         ]
         # Query custom activities
@@ -1411,7 +1495,9 @@ def render(USER, USER_CONFIG):
             new_def_sub1 = st.text_input("Default Sport", value=def_sub1_val, key="cfg_turf_sport")
             new_def_sub2 = st.text_input("Default Details", value=def_sub2_val, key="cfg_turf_detail")
             
-        elif selected_config_act == "Overthinking":
+        elif selected_config_act in ("Overthink", "Overthinking"):
+            _def_sub1_val = _current_defaults.get("Overthink", _current_defaults.get("Overthinking", ("", "")))[0]
+            _def_sub2_val = _current_defaults.get("Overthink", _current_defaults.get("Overthinking", ("", "")))[1]
             _ot_idx = 0
             if def_sub1_val in overthinking_triggers:
                 _ot_idx = overthinking_triggers.index(def_sub1_val)

@@ -97,6 +97,7 @@ def log_no_rejection(username):
 
 # ------------------ NOTIFICATIONS ------------------
 
+@st.cache_data(ttl=15)
 def get_latest_love_notifications(recipient):
     import database; conn = database.conn; c = database.c
     try:
@@ -116,8 +117,13 @@ def mark_notification_read(notif_id):
     try:
         c.execute("UPDATE system_notifications SET is_read = TRUE WHERE id = %s", (notif_id,))
         conn.commit()
+        try:
+            get_latest_love_notifications.clear()
+        except Exception:
+            pass
     except:
         pass
+
 
 
 def delete_notification(notif_id):

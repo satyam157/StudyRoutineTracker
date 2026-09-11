@@ -92,19 +92,29 @@ def reconnect():
         return None, None
 
 
+_last_conn_ping = 0
+
 def ensure_connection():
     """Check if connection is alive, reconnect if not."""
-    global conn, c
-    if conn is None or conn.closed != 0:
+    global conn, c, _last_conn_ping
+    if conn is None or getattr(conn, 'closed', 1) != 0:
+        _last_conn_ping = time.time()
         return reconnect()
+    
+    now = time.time()
+    if now - _last_conn_ping < 15:
+        return conn, c
+
     try:
-        # Ping the database
         tmp_cur = conn.cursor()
         tmp_cur.execute("SELECT 1")
         tmp_cur.close()
+        _last_conn_ping = now
     except Exception:
+        _last_conn_ping = now
         return reconnect()
     return conn, c
+
 
 
 def get_fresh_cursor():
@@ -332,6 +342,13 @@ if c is not None:
         except Exception:
             pass
 
+        # Data migration: normalize 'Overthinking' / '⚠️ Overthinking' to 'Overthink'
+        try:
+            c.execute("UPDATE activities SET type = 'Overthink' WHERE type IN ('Overthinking', '⚠️ Overthinking')")
+            conn.commit()
+        except Exception:
+            pass
+
         c.execute("""
         CREATE TABLE IF NOT EXISTS system_notifications (
             id SERIAL PRIMARY KEY,
@@ -541,6 +558,7 @@ def delete_esu_response(response_id, username):
         print(f"Error deleting Esu response: {e}")
 
 
+@st.cache_data(ttl=120)
 def get_user_config(username):
     """Retrieve love-related permissions for a user."""
     try:
@@ -579,9 +597,14 @@ def update_user_config(username, can_view, can_send_msg, can_receive_msg, can_re
         tmp_conn.commit()
         tmp_c.close()
         tmp_conn.close()
+        try:
+            get_user_config.clear()
+        except Exception:
+            pass
         return True
     except:
         return False
+
 
 
 def get_allowed_recipients(sender):

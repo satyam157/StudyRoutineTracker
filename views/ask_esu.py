@@ -65,7 +65,7 @@ def render(USER, USER_CONFIG):
     if not df_all.empty:
         prod_df = df_all[df_all['type'].isin(['Study', 'Study during trip', 'Revision', 'Book Reading', 'Answer Writing', 'Practice', 'Test'])]
         essential_df = df_all[df_all['type'].isin(['Office', 'WFH', 'Coaching'])]
-        waste_df_esu = df_all[df_all['type'].isin(['Entertainment', 'Social Media', 'Overthinking', '⚠️ Overthinking'])]
+        waste_df_esu = df_all[df_all['type'].isin(['Entertainment', 'Social Media', 'Overthink', 'Overthinking', '⚠️ Overthinking'])]
         
         prod_total_esu = prod_df['duration'].sum() if not prod_df.empty else 0
         essential_total_esu = essential_df['duration'].sum() if not essential_df.empty else 0

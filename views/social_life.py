@@ -248,10 +248,11 @@ def render(USER, USER_CONFIG):
             
             time_str = ""
             if act.get('start_time') and str(act['start_time']).strip().lower() not in ('nan', 'none', 'null'):
-                time_str = f"[{act['start_time']}] "
+                time_str = f"[{act['start_time']}]"
             
-            main_text = f"{time_str}{display_type}"
-            if val: main_text += f" ({val})"
+            val_str = f"({val})" if val else ""
+            parts = [p for p in (time_str, val_str, display_type) if p]
+            main_text = " ".join(parts)
             
             # Tag uses semi-transparent bg on colored cell
             tag_bg = "rgba(255,255,255,0.15)"

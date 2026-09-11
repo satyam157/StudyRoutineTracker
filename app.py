@@ -375,7 +375,7 @@ if st.sidebar.button("Logout", key="logout_btn", width='stretch'):
 st.sidebar.divider()
 
 menu_options = [
-    "Daily Entry","Calendar","Study Calendar","Social Life","Social Media & Calls","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
+    "Daily Entry","Calendar","Study Calendar","Social Life","Social Media & Calls","WastingTime","Set Target","Study Target Manager","Productivity Analysis","Ask Esu","Expenses"
 ]
 # --- PERMISSIONS & CONFIG ---
 get_user_config = database.get_user_config
@@ -901,6 +901,9 @@ elif menu == "Social Life":
     render(USER, USER_CONFIG)
 elif menu == "Social Media & Calls":
     from views.social_media_call import render
+    render(USER, USER_CONFIG)
+elif menu == "WastingTime":
+    from views.wasting_time import render
     render(USER, USER_CONFIG)
 elif menu == "Study Calendar":
     from views.study_calendar import render

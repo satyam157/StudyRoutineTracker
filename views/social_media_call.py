@@ -15,7 +15,7 @@ def render(USER, USER_CONFIG):
     <div style="display: flex; gap: 10px; margin-top: -8px; margin-bottom: 16px; flex-wrap: wrap; font-size: 12.5px;">
         <span style="background: rgba(249, 115, 22, 0.15); border: 1px solid #f97316; color: #fdba74; padding: 4px 10px; border-radius: 6px; font-weight: 600;">📱 Social Media</span>
         <span style="background: rgba(129, 140, 248, 0.15); border: 1px solid #818cf8; color: #c7d2fe; padding: 4px 10px; border-radius: 6px; font-weight: 600;">📞 TalkOnCall</span>
-        <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 4px 10px; border-radius: 6px; font-weight: 600;">⚠️ Overthinking (Waste)</span>
+        <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 4px 10px; border-radius: 6px; font-weight: 600;">Overthink</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -32,21 +32,23 @@ def render(USER, USER_CONFIG):
     # ── Activity types tracked on this calendar ──────────────────────────────
     _SM_TYPES    = ["Social Media"]
     _CALL_TYPES  = ["TalkOnCall"]
-    _OT_TYPES    = ["Overthinking", "⚠️ Overthinking"]
+    _OT_TYPES    = ["Overthink", "Overthinking", "⚠️ Overthinking"]
     _ALL_TYPES   = _SM_TYPES + _CALL_TYPES + _OT_TYPES
 
     # Color per type for calendar cells
     _TYPE_COLOR = {
         "Social Media": "#f97316",   # orange
         "TalkOnCall":   "#818cf8",   # indigo
+        "Overthink":    "#ef4444",   # danger red
         "Overthinking": "#ef4444",   # danger red
         "⚠️ Overthinking": "#ef4444",
     }
     _TYPE_ICON = {
         "Social Media": "📱",
         "TalkOnCall":   "📞",
-        "Overthinking": "⚠️",
-        "⚠️ Overthinking": "⚠️",
+        "Overthink":    "",
+        "Overthinking": "",
+        "⚠️ Overthinking": "",
     }
 
     df_all = get_activities_df(USER)
@@ -216,7 +218,7 @@ def render(USER, USER_CONFIG):
 
         sm_hrs   = hours_map.get('Social Media', 0.0)
         call_hrs = hours_map.get('TalkOnCall', 0.0)
-        ot_hrs   = hours_map.get('Overthinking', 0.0) + hours_map.get('⚠️ Overthinking', 0.0)
+        ot_hrs   = hours_map.get('Overthink', 0.0) + hours_map.get('Overthinking', 0.0) + hours_map.get('⚠️ Overthinking', 0.0)
         total_waste = sm_hrs + call_hrs + ot_hrs
         study_hrs = daily_prod.get(date_str, 0.0)
         
@@ -266,18 +268,21 @@ def render(USER, USER_CONFIG):
                 _TYPE_BG = {
                     "Social Media": "#1a1a1a",
                     "TalkOnCall": "#1a1a1a",
+                    "Overthink": "#3b0707",
                     "Overthinking": "#3b0707",
                     "⚠️ Overthinking": "#3b0707",
                 }
                 _TYPE_TEXT = {
                     "Social Media": "#ffffff",
                     "TalkOnCall": "#ffffff",
+                    "Overthink": "#fca5a5",
                     "Overthinking": "#fca5a5",
                     "⚠️ Overthinking": "#fca5a5",
                 }
                 _TYPE_BORDER = {
                     "Social Media": "1px solid rgba(255,255,255,0.1)",
                     "TalkOnCall": "1px solid rgba(255,255,255,0.1)",
+                    "Overthink": "1px solid #ef4444",
                     "Overthinking": "1px solid #ef4444",
                     "⚠️ Overthinking": "1px solid #ef4444",
                 }
@@ -289,7 +294,8 @@ def render(USER, USER_CONFIG):
 
                 parts = []
                 if dur > 0: parts.append(format_duration(dur))
-                chip_label = f"{icon} " + " · ".join(parts) if parts else f"{icon} {t}"
+                prefix = f"{icon} " if icon else ""
+                chip_label = f"{prefix}" + " · ".join(parts) if parts else f"{prefix}{t}"
 
                 tooltip = chip_label
                 if desc: tooltip += f" | {desc}"
@@ -329,7 +335,7 @@ def render(USER, USER_CONFIG):
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📱 Social Media", format_duration(sm_total))
     c2.metric("📞 Calls (TalkOnCall)", format_duration(call_total))
-    c3.metric("⚠️ Overthinking", format_duration(ot_total))
+    c3.metric("Overthink", format_duration(ot_total))
     c4.metric("🕐 Total Waste", format_duration(combined))
 
     if not smc_df.empty:
@@ -352,7 +358,7 @@ def render(USER, USER_CONFIG):
                 .sort_values('duration', ascending=False)
             )
             breakdown['duration_fmt'] = breakdown['duration'].apply(format_duration)
-            breakdown['type'] = breakdown['type'].apply(lambda x: f"⚠️ {x}" if "Overthinking" in x and "⚠️" not in x else x)
+            breakdown['type'] = breakdown['type'].apply(lambda x: "Overthink" if ("Overthink" in x or "Overthinking" in x) else x)
             breakdown.rename(columns={'type': 'Activity', 'subject': 'Platform / Person / Trigger', 'duration_fmt': 'Time'}, inplace=True)
             st.dataframe(breakdown[['Activity', 'Platform / Person / Trigger', 'Time']], hide_index=True, width='stretch')
         else:
@@ -377,7 +383,7 @@ def render(USER, USER_CONFIG):
             log_df = log_df.sort_values(by=['date', 'start_time'], na_position='last')
             
             display_df = log_df[['date', 'type', 'subject', 'chapter', 'Duration', 'description']].copy()
-            display_df['type'] = display_df['type'].apply(lambda x: f"⚠️ {x}" if "Overthinking" in x and "⚠️" not in x else x)
+            display_df['type'] = display_df['type'].apply(lambda x: "Overthink" if ("Overthink" in x or "Overthinking" in x) else x)
             display_df.rename(columns={
                 'date': 'Date',
                 'type': 'Activity',
@@ -390,5 +396,5 @@ def render(USER, USER_CONFIG):
         else:
             st.info(f"No entries found for the selected month.")
     else:
-        st.info("No Social Media, Call, or Overthinking entries recorded yet.")
+        st.info("No Social Media, Call, or Overthink entries recorded yet.")
 

@@ -233,20 +233,20 @@ def render(USER, USER_CONFIG):
     
             label  = f"{format_duration(done)}" if goal_unit == _HOURS_TYPE else str(done)
             icon   = "✅" if percent >= 100 else "🔵"
-            header = f"{icon} {disp_sub} — {percent}% ({label}/{total} {goal_unit})"
+            _eff_start_disp = _effective_start(t)
+            deadline_str = str(t.get('deadline', 'N/A'))
+            header = f"{icon} {disp_sub} — {percent}% ({label}/{total} {goal_unit})  |  Set Date: {_eff_start_disp} | Deadline: {deadline_str}"
             if achieved_on:
                 header += "  🎉"
     
-            # Compute effective start date for display
-            _eff_start_disp = _effective_start(t)
             # Show resolved IR label in header if subject remapped
             _resolved_sub_disp = _resolve_subject(sub, t.get('date_created'))
             _sub_label = f"{disp_sub} → [{_resolved_sub_disp}]" if _resolved_sub_disp != sub else disp_sub
 
             is_open = (percent > 0) if expanded is None else (bool(expanded) and percent > 0)
             with st.expander(header, expanded=is_open):
-                # Start date info bar
-                st.caption(f"📅 Counting from: **{_eff_start_disp or t.get('date_created', 'N/A')}**"
+                # Start date & deadline info bar
+                st.caption(f"📅 **Set Date:** {_eff_start_disp or t.get('date_created', 'N/A')}  |  🏁 **Deadline:** {deadline_str}"
                            + (f"  |  🗂️ Mapped to: **{_resolved_sub_disp}**" if _resolved_sub_disp != sub else ""))
 
                 mc1, mc2, mc3, mc4, mc5 = st.columns([1.5, 1, 1, 1, 1.5])
