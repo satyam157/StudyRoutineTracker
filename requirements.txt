@@ -10,3 +10,4 @@ supabase
 yt-dlp
 static-ffmpeg
 nodejs-bin
+extra-streamlit-components
