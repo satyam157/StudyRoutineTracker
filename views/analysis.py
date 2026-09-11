@@ -7,6 +7,9 @@ from logic import *
 import database
 from smart_tips import generate_smart_work_tips, render_smart_work_section
 import proposal
+import cf_visuals
+import importlib
+importlib.reload(cf_visuals)
 
 def render(USER, USER_CONFIG):
     import plotly.express as px
@@ -21,6 +24,9 @@ def render(USER, USER_CONFIG):
         if 'start_time' not in df.columns: df['start_time'] = None
         df['start_time'] = df.apply(lambda r: r['start_time'] if (pd.notna(r['start_time']) and r['start_time']) else (f"{extract_time_of_day(r['chapter'])}:00" if extract_time_of_day(r['chapter']) is not None else None), axis=1)
         df['chapter'] = df['chapter'].apply(get_clean_chapter)
+        # Guard: Filter out any future dates beyond today across analysis
+        today_date = get_ist_now().date()
+        df = df[pd.to_datetime(df['date']).dt.date <= today_date].copy()
     
     # Dynamically build PRODUCTIVE and ESSENTIAL from custom activities
     try:
@@ -39,14 +45,193 @@ def render(USER, USER_CONFIG):
     except NameError:
         ALL_NEUTRAL = ["Sleep", "Powernap", "Napping"]
     
-    tab_daily, tab_monthly, tab_yearly = st.tabs([
+    # Pre-calculate df_daily so it is available across all tabs and at bottom
+    cutoff_date = (get_ist_now().date() - timedelta(days=60)).strftime('%Y-%m-%d')
+    df_daily = df[df['date'] >= cutoff_date].copy() if not df.empty else df.copy()
+
+    tab_cf, tab_daily, tab_monthly, tab_yearly = st.tabs([
+        "🔥 Activity Heatmaps & Performance",
         "📅 Daily Productivity Analysis",
         "📆 Monthly Productivity Analysis",
         "📈 Yearly Productivity Analysis"
     ])
-    
+
     # ════════════════════════════════════════════
-    # TAB 1 — DAILY
+    # TAB 1 — PERFORMANCE GRAPH & ACTIVITY HEATMAPS
+    # ════════════════════════════════════════════
+    with tab_cf:
+        st.subheader("🔥 Activity Productivity Heatmaps & Performance")
+        st.caption("Codeforces-style performance timeline graphs and activity contribution heatmaps for Study, Revision, and Test activities.")
+
+        if df.empty:
+            st.info("No activity data found.")
+        else:
+            # Controls row
+            cf_col1, cf_col2, cf_col3 = st.columns([1.2, 1.2, 1.6])
+            
+            with cf_col1:
+                cf_act = st.selectbox(
+                    "Activity Filter",
+                    ["Study", "All 3 Combined", "Revision", "Test", "📑 Stacked View (All 3)"],
+                    index=0,
+                    key="cf_act_sel"
+                )
+            
+            with cf_col2:
+                # Available years
+                df_temp = df.copy()
+                df_temp['year_val'] = pd.to_datetime(df_temp['date']).dt.year
+                avail_years = sorted(list(df_temp['year_val'].dropna().unique()), reverse=True)
+                year_options = ["Last 365 Days"] + [str(int(y)) for y in avail_years]
+                cf_year = st.selectbox(
+                    "Choose Year",
+                    year_options,
+                    index=0,
+                    key="cf_year_sel"
+                )
+
+            with cf_col3:
+                graph_metric = st.selectbox(
+                    "Performance Graph Metric",
+                    [
+                        "⏱️ Productive Hours (Excl. Test)",
+                        "⏱️ Total Productive Hours",
+                        "📚 Study Hours",
+                        "🔄 Revision Hours",
+                        "📝 Test Hours",
+                        "🎯 Productivity Score (%)",
+                        "🧠 Focus Score (%)",
+                        "😴 Sleep Hours"
+                    ],
+                    index=0,
+                    key="cf_graph_metric_sel"
+                )
+
+            st.divider()
+
+            # --- 1. PERFORMANCE GRAPH ---
+            st.markdown("#### 📈 Codeforces-Style Performance Timeline")
+            st.caption("Timeline plotted against time in hours and routine scores with performance tiers and peak highlight.")
+            
+            # Prepare daily report with individual activity breakdown
+            try:
+                hl_all = read_sql("SELECT date, sleep_time, wakeup_time, powernap FROM health_logs WHERE username=%s ORDER BY date ASC", (USER,))
+                all_sleep_dict = {}
+                all_int_dict = {}
+                all_pn_dict = {}
+                if not hl_all.empty:
+                    hl_m = {str(r['date']): r for _, r in hl_all.iterrows()}
+                    for date_str in sorted(hl_m.keys()):
+                        curr = hl_m[date_str]
+                        prev_date = (pd.to_datetime(date_str) - timedelta(days=1)).strftime('%Y-%m-%d')
+                        prev = hl_m.get(prev_date, {})
+                        sleep_a = calculate_sleep_hours(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        sleep_b = 99.0
+                        s_curr = curr.get('sleep_time', '')
+                        if s_curr and "AM" in str(s_curr).upper():
+                            sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
+                        all_sleep_dict[date_str] = min(sleep_a, sleep_b)
+                        all_pn_dict[date_str] = curr.get('powernap', 0)
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str.upper():
+                            _raw_ints = [(s, e) for s, e in _raw_ints if s < 12.0]
+                        all_int_dict[date_str] = _raw_ints
+            except:
+                all_sleep_dict, all_int_dict, all_pn_dict = {}, {}, {}
+
+            all_time_rep = daily_report(df, sleep_data=all_sleep_dict, powernap_data=all_pn_dict, sleep_intervals_dict=all_int_dict)
+            
+            if not all_time_rep.empty:
+                # Merge individual activity hours per day
+                study_act = df[df['type'].isin(['Study', 'Study during trip'])].groupby('date')['duration'].sum()
+                rev_act   = df[df['type'] == 'Revision'].groupby('date')['duration'].sum()
+                test_act  = df[df['type'].isin(['Test', 'test'])].groupby('date')['duration'].sum()
+                
+                all_time_rep['study_hours'] = all_time_rep['date'].map(study_act).fillna(0).round(2)
+                all_time_rep['revision_hours'] = all_time_rep['date'].map(rev_act).fillna(0).round(2)
+                if 'test_hours' not in all_time_rep.columns:
+                    all_time_rep['test_hours'] = all_time_rep['date'].map(test_act).fillna(0).round(2)
+                if 'productive_no_test_hours' not in all_time_rep.columns:
+                    all_time_rep['productive_no_test_hours'] = (all_time_rep['productive_hours'] - all_time_rep['test_hours']).clip(lower=0).round(2)
+
+                # Focus score per day
+                focus_map = {}
+                for d_val, g_val in df.groupby('date'):
+                    focus_map[d_val] = focus_score(g_val)
+                all_time_rep['focus_score'] = all_time_rep['date'].map(focus_map).fillna(0).round(1)
+
+                # Filter by year if selected
+                graph_df = all_time_rep.copy()
+                if cf_year != "Last 365 Days":
+                    try:
+                        yr_int = int(cf_year)
+                        graph_df = graph_df[pd.to_datetime(graph_df['date']).dt.year == yr_int]
+                    except:
+                        pass
+                else:
+                    cutoff_365 = (get_ist_now().date() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    graph_df = graph_df[graph_df['date'] >= cutoff_365]
+
+                # Map chosen metric
+                metric_col_map = {
+                    "⏱️ Productive Hours (Excl. Test)": ("productive_no_test_hours", "Productive Hours (Excl. Test)"),
+                    "⏱️ Total Productive Hours": ("productive_hours", "Total Productive Hours"),
+                    "📚 Study Hours": ("study_hours", "Study Hours"),
+                    "🔄 Revision Hours": ("revision_hours", "Revision Hours"),
+                    "📝 Test Hours": ("test_hours", "Test Hours"),
+                    "🎯 Productivity Score (%)": ("productivity_%", "Productivity Score"),
+                    "🧠 Focus Score (%)": ("focus_score", "Focus Score"),
+                    "😴 Sleep Hours": ("sleep_hours", "Sleep Hours")
+                }
+                m_col, m_lbl = metric_col_map.get(graph_metric, ("productive_no_test_hours", "Productive Hours (Excl. Test)"))
+                
+                cf_visuals.render_codeforces_performance_graph(graph_df, metric_col=m_col, metric_label=m_lbl)
+            
+            st.divider()
+
+            # --- 2. PRODUCTIVITY HEATMAP ---
+            st.markdown("#### 🔥 Productivity Heatmaps & Streaks")
+            st.caption("Codeforces-style activity contribution heatmaps — green = Study activity, orange = Test activity.")
+
+            # Always show Study heatmap (green, GitHub-style)
+            st.markdown("##### 📚 Study Activity Heatmap")
+            cf_visuals.render_github_codeforces_heatmap(df, activity_type="Study", year=cf_year)
+
+            st.divider()
+
+            # Always show Test heatmap (amber/orange)
+            st.markdown("##### 📝 Test Activity Heatmap")
+            cf_visuals.render_github_codeforces_heatmap(df, activity_type="Test", year=cf_year)
+
+            # Show extra heatmap only when stacked or a specific non-Study/Test type chosen
+            if cf_act == "📑 Stacked View (All 3)":
+                st.divider()
+                st.markdown("##### 🔄 Revision Activity Heatmap")
+                cf_visuals.render_github_codeforces_heatmap(df, activity_type="Revision", year=cf_year)
+            elif cf_act not in ("Study", "Test", "📑 Stacked View (All 3)"):
+                st.divider()
+                st.markdown(f"##### Activity Heatmap — {cf_act}")
+                cf_visuals.render_github_codeforces_heatmap(df, activity_type=cf_act, year=cf_year)
+
+            # --- Top Study Streaks Table in Tab 1 ---
+            st.markdown("##### 🏆 Longest Study Streaks History")
+            study_only_df = df[df['type'].isin(['Study', 'Study during trip'])]
+            study_streaks = calculate_top_streaks(study_only_df)
+            if study_streaks:
+                top_streaks_df = pd.DataFrame(study_streaks)
+                top_streaks_df.columns = ["Start Date", "End Date", "Streak Length (Days)"]
+                top_streaks_df['Start Date'] = pd.to_datetime(top_streaks_df['Start Date']).dt.strftime('%d %b %Y')
+                top_streaks_df['End Date'] = pd.to_datetime(top_streaks_df['End Date']).dt.strftime('%d %b %Y')
+                st.dataframe(top_streaks_df, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No study streaks recorded yet.")
+
+    # ════════════════════════════════════════════
+    # TAB 2 — DAILY
     # ════════════════════════════════════════════
     with tab_daily:
         st.subheader("📅 Daily Productivity Analysis")
@@ -85,8 +270,15 @@ def render(USER, USER_CONFIG):
                         sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                         powernap_dict[date_str] = curr.get('powernap', 0)
                         
-                        # Store intervals for overlap logic
-                        sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        # Store intervals for overlap logic.
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints2 = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str2 = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str2.upper():
+                            _raw_ints2 = [(s, e) for s, e in _raw_ints2 if s < 12.0]
+                        sleep_intervals_dict[date_str] = _raw_ints2
             except:
                 sleep_hours_dict = {}
                 sleep_intervals_dict = {}
@@ -190,7 +382,14 @@ def render(USER, USER_CONFIG):
                         all_sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                         all_powernap_dict[date_str] = curr.get('powernap', 0)
                         
-                        all_sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        # Only use the morning portion of sleep intervals for current-day overlap.
+                        # The PM portion (e.g. 21:30-24:00) belongs to the PREVIOUS night's timeline
+                        # and must NOT be applied to the current day's activities.
+                        _raw_ints3 = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                        _prev_sleep_str3 = str(prev.get('sleep_time', '') or '')
+                        if 'PM' in _prev_sleep_str3.upper():
+                            _raw_ints3 = [(s, e) for s, e in _raw_ints3 if s < 12.0]
+                        all_sleep_intervals_dict[date_str] = _raw_ints3
             except:
                 all_sleep_intervals_dict = {}
                 all_sleep_hours_dict = {}
@@ -207,8 +406,8 @@ def render(USER, USER_CONFIG):
                     st.markdown("#### Top 10 Days")
                     col_p, col_w = st.columns(2)
                     with col_p:
-                        st.markdown("**Productive Days**")
-                        st.dataframe(get_top_periods(all_time_report, 'Day', 'productive'), hide_index=True, width='stretch')
+                        st.markdown("**Productive Days** *(Excl. Test)*")
+                        st.dataframe(get_top_periods(all_time_report, 'Day', 'productive', exclude_test=True), hide_index=True, width='stretch')
                     with col_w:
                         st.markdown("**Waste Days**")
                         st.dataframe(get_top_periods(all_time_report, 'Day', 'waste'), hide_index=True, width='stretch')
@@ -695,7 +894,12 @@ def render(USER, USER_CONFIG):
             
             # We assume day-analysis shows sleep ending on that day
             # If they slept at 11 PM yesterday and woke up 6 AM today, we show 0-6 AM as sleep today.
-            day_sleep_intervals = get_sleep_intervals(prev_hl.get('sleep_time'), curr_hl.get('wakeup_time'))
+            # Only keep morning portion — the PM segment (e.g. 21.5-24.0) belongs to the previous night.
+            _di_raw = get_sleep_intervals(prev_hl.get('sleep_time'), curr_hl.get('wakeup_time'))
+            _prev_s = str(prev_hl.get('sleep_time', '') or '')
+            if 'PM' in _prev_s.upper():
+                _di_raw = [(s, e) for s, e in _di_raw if s < 12.0]
+            day_sleep_intervals = _di_raw
             
             tod_df = time_of_day_analysis_24h(df_selected, sleep_intervals=day_sleep_intervals)
             if not tod_df.empty:
@@ -817,7 +1021,12 @@ def render(USER, USER_CONFIG):
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
-                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            # Only keep morning portion — PM segment belongs to previous night
+                            _m_raw = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            _m_prev_s = str(prev.get('sleep_time', '') or '')
+                            if 'PM' in _m_prev_s.upper():
+                                _m_raw = [(s, e) for s, e in _m_raw if s < 12.0]
+                            sleep_intervals_dict[date_str] = _m_raw
                 except:
                     sleep_hours_dict = {}
                     sleep_intervals_dict = {}
@@ -1027,8 +1236,12 @@ def render(USER, USER_CONFIG):
                         curr_h = hl_map.get(str(d_str), {})
                         prev_d = (pd.to_datetime(str(d_str)) - timedelta(days=1)).strftime('%Y-%m-%d')
                         prev_h = hl_map.get(prev_d, {})
-                        intervals = get_sleep_intervals(prev_h.get('sleep_time'), curr_h.get('wakeup_time'))
-                        all_m_sleep_intervals.extend(intervals)
+                        # Only keep morning portion — PM segment belongs to previous night
+                        _cm_raw = get_sleep_intervals(prev_h.get('sleep_time'), curr_h.get('wakeup_time'))
+                        _cm_prev_s = str(prev_h.get('sleep_time', '') or '')
+                        if 'PM' in _cm_prev_s.upper():
+                            _cm_raw = [(s, e) for s, e in _cm_raw if s < 12.0]
+                        all_m_sleep_intervals.extend(_cm_raw)
     
                     cumul_24h = time_of_day_analysis_cumulative_24h(month_df, filter_month=month_str, all_sleep_intervals=all_m_sleep_intervals)
                 except Exception as e:
@@ -1180,7 +1393,12 @@ def render(USER, USER_CONFIG):
                                 sleep_b = calculate_sleep_hours(s_curr, curr.get('wakeup_time'))
                             sleep_hours_dict[date_str] = min(sleep_a, sleep_b)
                             powernap_dict[date_str] = curr.get('powernap', 0)
-                            sleep_intervals_dict[date_str] = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            # Only keep morning portion — PM segment belongs to previous night
+                            _y_raw = get_sleep_intervals(prev.get('sleep_time'), curr.get('wakeup_time'))
+                            _y_prev_s = str(prev.get('sleep_time', '') or '')
+                            if 'PM' in _y_prev_s.upper():
+                                _y_raw = [(s, e) for s, e in _y_raw if s < 12.0]
+                            sleep_intervals_dict[date_str] = _y_raw
                 except:
                     sleep_hours_dict = {}
                     sleep_intervals_dict = {}

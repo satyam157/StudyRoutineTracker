@@ -332,6 +332,13 @@ if c is not None:
         except Exception:
             pass
 
+        # Data migration: normalize 'Overthinking' / '⚠️ Overthinking' to 'Overthink'
+        try:
+            c.execute("UPDATE activities SET type = 'Overthink' WHERE type IN ('Overthinking', '⚠️ Overthinking')")
+            conn.commit()
+        except Exception:
+            pass
+
         c.execute("""
         CREATE TABLE IF NOT EXISTS system_notifications (
             id SERIAL PRIMARY KEY,

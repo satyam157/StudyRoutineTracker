@@ -12,7 +12,7 @@ study_subjects = [
 
 ent_types = ["Movie","Sports","friendMeetup"]
 movie_modes = ["Room","Outside"]
-social_platform = ["SocialMediaHopping (Loneliness - Good)", "Instagram", "YouTube", "Snapchat", "LinkedIn", "Twitter", "WhatsApp", "Other"]
+social_platform = ["SocialMediaHop", "Instagram", "YouTube", "Snapchat", "LinkedIn", "Twitter", "WhatsApp", "Other"]
 talkoncall_withwhom = ["Bestie", "Parent", "Friend", "Other"]
 content_type = ["Stories/Chat"]
 food_sources = ["Swiggy","Zomato","Outside"]
@@ -220,6 +220,11 @@ def daily_report(df, sleep_data=None, powernap_data=None, sleep_intervals_dict=N
         # Use helper for adjusted sums
         productive, essential, waste_logged = get_adjusted_sums(g, {date_str: intervals})
         
+        # Test hours calculation
+        g_test = g[g['type'].astype(str).str.strip().str.lower() == 'test']
+        test_hours, _, _ = get_adjusted_sums(g_test, {date_str: intervals}) if not g_test.empty else (0.0, 0.0, 0.0)
+        productive_no_test = max(0.0, productive - test_hours)
+        
         # Get sleep and powernap hours
         sleep_hours = sleep_data.get(date_str, 0)
         powernap_hours = powernap_data.get(date_str, 0)
@@ -246,6 +251,8 @@ def daily_report(df, sleep_data=None, powernap_data=None, sleep_intervals_dict=N
             "productivity_%": score,
             "waste_%": waste_score,
             "productive_hours": round(productive, 2),
+            "productive_no_test_hours": round(productive_no_test, 2),
+            "test_hours": round(test_hours, 2),
             "waste_hours": round(waste, 2),
             "essential_hours": round(essential, 2),
             "sleep_hours": round(sleep_hours, 2),
@@ -948,15 +955,26 @@ def sub_activity_trend(df, main_activity, sleep_intervals_dict=None):
 # ════════════════════════════════════════════════════════════════════════
 from smart_tips import generate_smart_work_tips, render_smart_work_section
 
-def get_top_periods(daily_df, period_type, category):
+def get_top_periods(daily_df, period_type, category, exclude_test=None):
     """
     Returns the top 10 periods (Day, Week, Month, Year) for a given category (productive, waste).
     Takes in a daily_df (output of daily_report).
+    If category == 'productive' and exclude_test is True (default for 'Day'), test hours are excluded.
     """
     if daily_df.empty:
         return pd.DataFrame()
 
+    if exclude_test is None:
+        exclude_test = (period_type == 'Day' and category == 'productive')
+
     df = daily_df.copy()
+    
+    if category == 'productive' and exclude_test:
+        if 'productive_no_test_hours' in df.columns:
+            df['productive_hours'] = df['productive_no_test_hours']
+        elif 'test_hours' in df.columns:
+            df['productive_hours'] = (df['productive_hours'] - df['test_hours']).clip(lower=0)
+
     df['date_obj'] = pd.to_datetime(df['date'])
     
     if period_type == 'Day':

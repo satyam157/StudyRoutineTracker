@@ -109,7 +109,7 @@ def render(USER, USER_CONFIG):
         _user_defaults = get_user_defaults(USER)
         base_activities = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthink", "Food", "Transport",
             "Office", "WFH", "Coaching", "WatchingMatch", "WentOutside",
             "Turf", "Travelling", "Powernap"
         ]
@@ -194,7 +194,7 @@ def render(USER, USER_CONFIG):
         with _act_col:
             _all_acts = base_activities + custom + ["+ Add New"]
             _def_act_idx = _all_acts.index(_editing_activity_type) if _editing_activity_type in _all_acts else 0
-            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx, format_func=lambda x: "⚠️ Overthinking (Waste)" if x == "Overthinking" else x)
+            activity = st.selectbox("Activity", _all_acts, index=_def_act_idx)
             
             if st.session_state.get("last_selected_activity") != activity:
                 # Don't wipe edit state when editing mode just loaded with the correct activity
@@ -514,17 +514,8 @@ def render(USER, USER_CONFIG):
             _t2 = st.text_input("Destination", value=_v2, placeholder=_p2, key="de_travel_dest")
             sub2 = _final_val(_t2, _base_dest)
             st.caption("💡 For multi-day trips with study tracking, use the **✈️ Log Trip** tab.")
-        elif activity == "Overthinking":
-            st.markdown("""
-            <div style="background: rgba(239, 68, 68, 0.12); border: 1.5px solid #ef4444; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">⚠️</span>
-                <div>
-                    <span style="color: #fca5a5; font-weight: 700; font-size: 13.5px;">Waste Activity Alert — Overthinking</span><br>
-                    <span style="color: #94a3b8; font-size: 11.5px;">Track your overthinking triggers to identify patterns and reclaim your study focus.</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            _def_sub1, _def_sub2 = _user_defaults.get("Overthinking", ("", ""))
+        elif activity in ("Overthink", "Overthinking"):
+            _def_sub1, _def_sub2 = _user_defaults.get("Overthink") or _user_defaults.get("Overthinking", ("", ""))
             _def_ot_idx = 0
             if _def_sub1 in overthinking_triggers:
                 _def_ot_idx = overthinking_triggers.index(_def_sub1)
@@ -729,7 +720,7 @@ def render(USER, USER_CONFIG):
         else:
             for _, _row in _today_df.iterrows():
                 rid = int(_row['id'])
-                _act_disp = f"⚠️ {_row['type']}" if _row['type'] in ("Overthinking", "⚠️ Overthinking") else _row['type']
+                _act_disp = _row['type']
                 parts = [_act_disp]
                 if _row['subject']: parts.append(str(_row['subject']))
                 ch = get_clean_chapter(_row['chapter'])
@@ -1284,7 +1275,7 @@ def render(USER, USER_CONFIG):
     
         _ACT_TYPES = [
             "Study", "Revision", "Book Reading", "Answer Writing", "Practice", "Test",
-            "Entertainment", "Social Media", "TalkOnCall", "Overthinking", "Food", "Transport",
+            "Entertainment", "Social Media", "TalkOnCall", "Overthink", "Food", "Transport",
             "Office", "WFH", "Coaching", "WentOutside", "Turf", "Travelling"
         ]
         # Query custom activities
@@ -1411,7 +1402,9 @@ def render(USER, USER_CONFIG):
             new_def_sub1 = st.text_input("Default Sport", value=def_sub1_val, key="cfg_turf_sport")
             new_def_sub2 = st.text_input("Default Details", value=def_sub2_val, key="cfg_turf_detail")
             
-        elif selected_config_act == "Overthinking":
+        elif selected_config_act in ("Overthink", "Overthinking"):
+            _def_sub1_val = _current_defaults.get("Overthink", _current_defaults.get("Overthinking", ("", "")))[0]
+            _def_sub2_val = _current_defaults.get("Overthink", _current_defaults.get("Overthinking", ("", "")))[1]
             _ot_idx = 0
             if def_sub1_val in overthinking_triggers:
                 _ot_idx = overthinking_triggers.index(def_sub1_val)
